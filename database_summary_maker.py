@@ -20,12 +20,12 @@ CONNECTION_LVJDE = "SERVER=PWJDESQL01;DATABASE=JDE_PRODUCTION;"
 ELEC_FILE = r"old_Electricity GIS-SAP Attribute Mapping.xlsx"
 GAS_FILE = "Gas_Network_Model_1.7.xlsx"
 
-# LOCATED = 'P:\\NF\\Data Migration\\Data Decisions\\'
-LOCATED = ''
+LOCATED = 'P:\\NF\\Data Migration\\Data Decisions\\'
+# LOCATED = ''
 FILE_START = 'Data_Decisions_Summary-V'
 FILE_END = '.xlsx'
-# DEST_LOCATION = 'P:\\NF\\Data Migration\\Data Decisions\\Archive\\'
-DEST_LOCATION = ''
+DEST_LOCATION = 'P:\\NF\\Data Migration\\Data Decisions\\Archive\\'
+# DEST_LOCATION = ''
 
 
 def get_sql_connection(conn_string):
@@ -242,6 +242,7 @@ def excel_print(data, outfile_name):
     excel_writer = pd.ExcelWriter(LOCATED + outfile_name, engine='xlsxwriter')
     data.to_excel(excel_writer, sheet_name='GIS Data',
                   index=False, freeze_panes=(1, 0))
+
     names_dict = dict((v, k) for k, v in dict(enumerate(list(data))).items())
     num_cols = len(list(data))
     num_rows = len(data)
@@ -285,7 +286,7 @@ def script_runner():
 
     strp_elec, strp_gas, strp_old, old_sap = file_loading(infile)
 
-    eg_data = pd.concat([strp_elec, strp_gas])
+    eg_data = pd.concat([strp_elec, strp_gas], sort=True)
     eg_data = strip_sql(eg_data)
     eg_data = eg_data.drop_duplicates(subset=['TABLE', 'NAME', 'SAP'])
 
