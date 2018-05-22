@@ -21,11 +21,9 @@ ELEC_FILE = r"old_Electricity GIS-SAP Attribute Mapping.xlsx"
 GAS_FILE = "Gas_Network_Model_1.7.xlsx"
 
 LOCATED = 'P:\\NF\\Data Migration\\Data Decisions\\'
-# LOCATED = ''
 FILE_START = 'Data_Decisions_Summary-V'
 FILE_END = '.xlsx'
 DEST_LOCATION = 'P:\\NF\\Data Migration\\Data Decisions\\Archive\\'
-# DEST_LOCATION = ''
 
 
 def get_sql_connection(conn_string):
@@ -46,6 +44,9 @@ def get_sql(sql, conn_string_part, headers=None):
         data = pd.read_sql_query(sql, cnxn)
     except pd.io.sql.DatabaseError:
         print("SQL DataBase Error")
+        print(sql)
+        print("-------------------")
+        print("-------------------")
         data = None
     else:
         if headers is not None:
@@ -87,7 +88,7 @@ def file_loading(in_file):
     strp_elec = elec_data[['GIS Table', 'GIS Column Name', 'ALIAS ', 'E/FLOC',
                            'SAP required']]
     strp_elec = strp_elec.rename(columns={'GIS Table': 'TABLE',
-                                          'GIS Column Name': 'NAME',
+                                          'GIS Column Name': 'COLUMN',
                                           'ALIAS ': 'ALIAS',
                                           'SAP required': 'SAP'})
     strp_elec['ELEC/GAS'] = 'E'
@@ -97,14 +98,15 @@ def file_loading(in_file):
                          'SAP Technical Object Description',
                          'SAP Field Name']]
     strp_gas = strp_gas.rename(columns={'OBJECTCLASSNAME': 'TABLE',
-                                        'NAME2': 'NAME',
+                                        'NAME2': 'COLUMN',
                                         'FIELDALIAS': 'ALIAS',
                                         'FLOC - EQUIP': 'E/FLOC',
                                         'Migrated GIS to SAP ': 'SAP'})
     strp_gas['ELEC/GAS'] = 'G'
-    strp_old = old_eg_data[['TABLE', 'NAME', 'Incorrect Data', 'DR#', 'Notes']]
-    strp_old = strp_old.drop_duplicates(subset=['TABLE', 'NAME'])
-    old_sap = old_eg_data[['TABLE', 'NAME', 'SAP', 'Date Changed']]
+    strp_old = old_eg_data[['TABLE', 'COLUMN', 'MDS CRITICAL',
+                            'Incorrect Data', 'DR#', 'Notes']]
+    strp_old = strp_old.drop_duplicates(subset=['TABLE', 'COLUMN'])
+    old_sap = old_eg_data[['TABLE', 'COLUMN', 'SAP', 'Date Changed']]
 
     return strp_elec, strp_gas, strp_old, old_sap
 
@@ -115,17 +117,17 @@ def strip_sql(data):
                 ["Auxiliary Equipment", "AUXILLARYEQUIPMENT"]]
     for old_str, new_str in tab_fixs:
         data['TABLE'] = data['TABLE'].str.replace(old_str, new_str)
-    data = data.dropna(subset=['NAME'])
+    data = data.dropna(subset=['COLUMN'])
     bad_atts = [" ", "SHAPE_Length", "HVFUSES", "LVFUSES", "SHAPE_Area",
                 "ACTUALLENGTH", "DECOMMISSIONINGDATE", "DECOMMISSIONINGREASON"]
-    data = data[~data['NAME'].isin(bad_atts)]
+    data = data[~data['COLUMN'].isin(bad_atts)]
     bad_tab_atts = [['SWITCHUNIT', 'INTERRUPTINGMEDIUM'],
                     ['DistributionMain', 'CROSSINGID'],
                     ['DistributionMain', 'MOUNTINGTYPE'],
                     ['DistributionMain', 'MOUNTINGPOSITION']]
     for tab_str, att_str in bad_tab_atts:
         data = data[~(data['TABLE'].str.contains(tab_str) &
-                      data['NAME'].str.contains(att_str))]
+                      data['COLUMN'].str.contains(att_str))]
     bad_doubles = [['Regulator', 'SUBTYPECD', 'y'],
                    ['RegulatorStation', 'EQUIPMENTID', 'N'],
                    ['SurfaceStructure', 'APPLICATION', 'N'],
@@ -139,13 +141,13 @@ def strip_sql(data):
                    ['COMMSPOWERSUPPLY', 'BATTERYCOUNT', 'N']]
     for tab_str, att_str, sap_str in bad_doubles:
         data = data[~(data['TABLE'].str.contains(tab_str) &
-                      data['NAME'].str.contains(att_str) &
+                      data['COLUMN'].str.contains(att_str) &
                       data['SAP'].str.contains(sap_str))]
     bad_null = [['SurfaceStructure', 'ENCLOSURE'],
                 ['SurfaceStructure', 'ENCLOSUREMANUFACTURER']]
     for tab_str, att_str in bad_null:
         data = data[~(data['TABLE'].str.contains(tab_str) &
-                      data['NAME'].str.contains(att_str) &
+                      data['COLUMN'].str.contains(att_str) &
                       data['SAP'].isnull())]
     return data
 
@@ -157,7 +159,7 @@ def diff_columns(data):  # This function needs to be updated to remove warning.
             (pd.notnull(data['SAP_x']) & pd.notnull(data['SAP_y']))):
         data['Date Changed'] = (str(data['SAP_y']) + ' to ' +
                                 str(data['SAP_x']) + ' ' + n_date)
-        print(str(data['TABLE']) + ' ' + str(data['NAME']) + ' ' +
+        print(str(data['TABLE']) + ' ' + str(data['COLUMN']) + ' ' +
               data['Date Changed'])
     return data
 
@@ -189,7 +191,7 @@ def null_sql(data):
     """Quarries the number of NULLS per attribute."""
     sql_cmd = """SELECT count(*) AS 'Count'
     FROM PCOGIS.SDE.""" + str(data['TABLE']) + """
-    WHERE """ + str(data['NAME']) + " IS NULL"
+    WHERE """ + str(data['COLUMN']) + " IS NULL"
     col = get_sql(sql_cmd, CONNECTION_GIS)
     new_col = col["count"].iloc[-1]
     return new_col
@@ -197,7 +199,7 @@ def null_sql(data):
 
 def nonblank_sql(data):
     """Quarries the number of non-nulls per attribute."""
-    sql_cmd = "SELECT count(" + str(data['NAME']) + """) AS 'Count'
+    sql_cmd = "SELECT count(" + str(data['COLUMN']) + """) AS 'Count'
     FROM PCOGIS.SDE.""" + str(data['TABLE'])
     col = get_sql(sql_cmd, CONNECTION_GIS)
     new_col = col["count"].iloc[-1]
@@ -216,13 +218,14 @@ def objectid_sql(table_name):
 def final_order(data):
     """Sorts both cols and rows to desired order."""
     data = data[['TABLE',
-                 'NAME',
+                 'COLUMN',
                  'ALIAS',
                  'E/FLOC',
                  'GIS Type',
                  'GIS - Limit/Precision',
                  'DOMAIN LOOKUP',
                  'ELEC/GAS',
+                 'MDS CRITICAL',
                  'SAP',
                  'Date Changed',
                  'NULL',
@@ -233,7 +236,7 @@ def final_order(data):
                  '% Complete',
                  'DR#',
                  'Notes']]
-    data = data.sort_values(by=['TABLE', 'NAME'])
+    data = data.sort_values(by=['TABLE', 'COLUMN'])
     return data
 
 
@@ -288,34 +291,36 @@ def script_runner():
 
     eg_data = pd.concat([strp_elec, strp_gas], sort=True)
     eg_data = strip_sql(eg_data)
-    eg_data = eg_data.drop_duplicates(subset=['TABLE', 'NAME', 'SAP'])
+    eg_data = eg_data.drop_duplicates(subset=['TABLE', 'COLUMN', 'SAP'])
 
     eg_data = pd.merge(eg_data, strp_old, how='left',
-                       left_on=['TABLE', 'NAME'], right_on=['TABLE', 'NAME'])
+                       left_on=['TABLE', 'COLUMN'],
+                       right_on=['TABLE', 'COLUMN'])
 
-    new_sap = eg_data[['TABLE', 'NAME', 'SAP']]
+    new_sap = eg_data[['TABLE', 'COLUMN', 'SAP']]
     old_sap = strip_sql(old_sap)
-    old_sap = old_sap.drop_duplicates(subset=['TABLE', 'NAME', 'SAP'])
-    dif_sap = pd.merge(new_sap, old_sap, how='left', left_on=['TABLE', 'NAME'],
-                       right_on=['TABLE', 'NAME'])
+    old_sap = old_sap.drop_duplicates(subset=['TABLE', 'COLUMN', 'SAP'])
+    dif_sap = pd.merge(new_sap, old_sap, how='left',
+                       left_on=['TABLE', 'COLUMN'],
+                       right_on=['TABLE', 'COLUMN'])
     dif_sap = dif_sap.apply(diff_columns, axis=1)
-    new_dif_sap = dif_sap[['TABLE', 'NAME', 'Date Changed']]
+    new_dif_sap = dif_sap[['TABLE', 'COLUMN', 'Date Changed']]
 
-    new_dif_sap = new_dif_sap.drop_duplicates(subset=['TABLE', 'NAME',
+    new_dif_sap = new_dif_sap.drop_duplicates(subset=['TABLE', 'COLUMN',
                                                       'Date Changed'])
     eg_data = pd.merge(eg_data, new_dif_sap, how='left',
-                       left_on=['TABLE', 'NAME'],
-                       right_on=['TABLE', 'NAME'])
+                       left_on=['TABLE', 'COLUMN'],
+                       right_on=['TABLE', 'COLUMN'])
     eg_data['% Not-NULL'] = np.nan
     eg_data['% Complete'] = np.nan
 
     dom_look = des_table_sql()
     dom_look = dom_look.rename(columns={'table_': 'TABLE',
-                                        'field_name': 'NAME',
+                                        'field_name': 'COLUMN',
                                         'domain lookup': 'DOMAIN LOOKUP'})
     eg_data = pd.merge(eg_data, dom_look, how='left',
-                       left_on=['TABLE', 'NAME'],
-                       right_on=['TABLE', 'NAME'])
+                       left_on=['TABLE', 'COLUMN'],
+                       right_on=['TABLE', 'COLUMN'])
     eg_data['DOMAIN LOOKUP'] = eg_data['DOMAIN LOOKUP'].fillna('N')
 
     all_schema = get_schema(CONNECTION_GIS)
@@ -332,7 +337,7 @@ def script_runner():
     strp_schema['TABLE_up'] = strp_schema['TABLE_up'].str.upper()
     strp_schema['NAME_up'] = strp_schema['NAME_up'].str.upper()
     eg_data['TABLE_up'] = eg_data['TABLE'].str.upper()
-    eg_data['NAME_up'] = eg_data['NAME'].str.upper()
+    eg_data['NAME_up'] = eg_data['COLUMN'].str.upper()
     eg_data = pd.merge(eg_data, strp_schema, how='left',
                        left_on=['TABLE_up', 'NAME_up'],
                        right_on=['TABLE_up', 'NAME_up'])
