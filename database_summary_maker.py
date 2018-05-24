@@ -152,6 +152,68 @@ def strip_sql(data):
     return data
 
 
+def schema_list(data):
+    """Creats a more complete list of fields from the schema."""
+    all_schema = get_schema(CONNECTION_GIS)
+    all_schema['GIS - Limit/Precision'] = all_schema[
+        'character_maximum_length'].fillna(all_schema[
+            'numeric_precision']).fillna(all_schema[
+                'datetime_precision'])
+    strp_schema = all_schema[~all_schema['table_schema'].str.contains('jde')]
+    strp_schema = strp_schema[['table_name', 'column_name',
+                               'data_type', 'GIS - Limit/Precision']]
+    strp_schema = strp_schema.rename(columns={'table_name': 'TABLE',
+                                              'column_name': 'COLUMN',
+                                              'data_type': 'GIS Type'})
+    strp_schema['TABLE_up'] = strp_schema['TABLE'].str.upper()
+    strp_schema['NAME_up'] = strp_schema['COLUMN'].str.upper()
+    data['TABLE_up'] = data['TABLE'].str.upper()
+    data['NAME_up'] = data['COLUMN'].str.upper()
+    unique_tabs = data['TABLE_up'].unique()
+
+    fin_schema = strp_schema[strp_schema['TABLE_up'].isin(unique_tabs)]
+    eg_stat = data[['TABLE_up', 'ELEC/GAS']]
+    eg_stat = eg_stat.drop_duplicates(subset=['TABLE_up', 'ELEC/GAS'])
+    fin_schema = pd.merge(fin_schema, eg_stat, how='left',
+                          left_on=['TABLE_up'],
+                          right_on=['TABLE_up'])
+
+    strp_columns = list(data)
+    strp_columns.remove('TABLE')
+    strp_columns.remove('COLUMN')
+    strp_columns.remove('ELEC/GAS')
+    new_data = data[strp_columns]
+
+    fin_data = pd.merge(fin_schema, new_data, how='left',
+                        left_on=['TABLE_up', 'NAME_up'],
+                        right_on=['TABLE_up', 'NAME_up'])
+    fin_list = list(fin_data)
+    fin_list.remove('TABLE_up')
+    fin_list.remove('NAME_up')
+    fin_data = fin_data[fin_list]
+    return fin_data
+
+
+def up_merge(data1, data2):
+    """Panda merge using uppercase."""
+    data1['TABLE_up'] = data1['TABLE'].str.upper()
+    data1['NAME_up'] = data1['COLUMN'].str.upper()
+    data2['TABLE_up'] = data2['TABLE'].str.upper()
+    data2['NAME_up'] = data2['COLUMN'].str.upper()
+    strp_columns = list(data2)
+    strp_columns.remove('TABLE')
+    strp_columns.remove('COLUMN')
+    data2 = data2[strp_columns]
+    fin_data = pd.merge(data1, data2, how='left',
+                        left_on=['TABLE_up', 'NAME_up'],
+                        right_on=['TABLE_up', 'NAME_up'])
+    fin_list = list(fin_data)
+    fin_list.remove('TABLE_up')
+    fin_list.remove('NAME_up')
+    fin_data = fin_data[fin_list]
+    return fin_data
+
+
 def diff_columns(data):  # This function needs to be updated to remove warning.
     """Determines if there is a SAP migration change and dates change."""
     n_date = datetime.date.today().strftime("%d-%m-%y")
@@ -197,7 +259,7 @@ def null_sql(data):
     return new_col
 
 
-def nonblank_sql(data):
+def nonblank_sql(data):  # This causes a Warning!?
     """Quarries the number of non-nulls per attribute."""
     sql_cmd = "SELECT count(" + str(data['COLUMN']) + """) AS 'Count'
     FROM PCOGIS.SDE.""" + str(data['TABLE'])
@@ -293,24 +355,20 @@ def script_runner():
     eg_data = strip_sql(eg_data)
     eg_data = eg_data.drop_duplicates(subset=['TABLE', 'COLUMN', 'SAP'])
 
-    eg_data = pd.merge(eg_data, strp_old, how='left',
-                       left_on=['TABLE', 'COLUMN'],
-                       right_on=['TABLE', 'COLUMN'])
+    eg_data = schema_list(eg_data)
+
+    eg_data = up_merge(eg_data, strp_old)
 
     new_sap = eg_data[['TABLE', 'COLUMN', 'SAP']]
     old_sap = strip_sql(old_sap)
     old_sap = old_sap.drop_duplicates(subset=['TABLE', 'COLUMN', 'SAP'])
-    dif_sap = pd.merge(new_sap, old_sap, how='left',
-                       left_on=['TABLE', 'COLUMN'],
-                       right_on=['TABLE', 'COLUMN'])
+    dif_sap = up_merge(new_sap, old_sap)
     dif_sap = dif_sap.apply(diff_columns, axis=1)
     new_dif_sap = dif_sap[['TABLE', 'COLUMN', 'Date Changed']]
 
     new_dif_sap = new_dif_sap.drop_duplicates(subset=['TABLE', 'COLUMN',
                                                       'Date Changed'])
-    eg_data = pd.merge(eg_data, new_dif_sap, how='left',
-                       left_on=['TABLE', 'COLUMN'],
-                       right_on=['TABLE', 'COLUMN'])
+    eg_data = up_merge(eg_data, new_dif_sap)
     eg_data['% Not-NULL'] = np.nan
     eg_data['% Complete'] = np.nan
 
@@ -318,29 +376,8 @@ def script_runner():
     dom_look = dom_look.rename(columns={'table_': 'TABLE',
                                         'field_name': 'COLUMN',
                                         'domain lookup': 'DOMAIN LOOKUP'})
-    eg_data = pd.merge(eg_data, dom_look, how='left',
-                       left_on=['TABLE', 'COLUMN'],
-                       right_on=['TABLE', 'COLUMN'])
+    eg_data = up_merge(eg_data, dom_look)
     eg_data['DOMAIN LOOKUP'] = eg_data['DOMAIN LOOKUP'].fillna('N')
-
-    all_schema = get_schema(CONNECTION_GIS)
-    all_schema['GIS - Limit/Precision'] = all_schema[
-        'character_maximum_length'].fillna(all_schema[
-            'numeric_precision']).fillna(all_schema[
-                'datetime_precision'])
-    strp_schema = all_schema[~all_schema['table_schema'].str.contains('jde')]
-    strp_schema = strp_schema[['table_name', 'column_name',
-                               'data_type', 'GIS - Limit/Precision']]
-    strp_schema = strp_schema.rename(columns={'table_name': 'TABLE_up',
-                                              'column_name': 'NAME_up',
-                                              'data_type': 'GIS Type'})
-    strp_schema['TABLE_up'] = strp_schema['TABLE_up'].str.upper()
-    strp_schema['NAME_up'] = strp_schema['NAME_up'].str.upper()
-    eg_data['TABLE_up'] = eg_data['TABLE'].str.upper()
-    eg_data['NAME_up'] = eg_data['COLUMN'].str.upper()
-    eg_data = pd.merge(eg_data, strp_schema, how='left',
-                       left_on=['TABLE_up', 'NAME_up'],
-                       right_on=['TABLE_up', 'NAME_up'])
 
     print('Querying the number of nulls per attribute. As of '
           + str(datetime.datetime.now()))
