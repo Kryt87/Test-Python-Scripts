@@ -302,6 +302,22 @@ def final_order(data):
     return data
 
 
+def add_nn_comp_forms(worksheet, names_dict, num_rows):
+    """Creates a percentage formula for two columns in excel."""
+    notnull_let = xl_col_to_name(names_dict['Not-NULL'])
+    incor_let = xl_col_to_name(names_dict['Incorrect Data'])
+    total_let = xl_col_to_name(names_dict['Total'])
+
+    for i in range(1, num_rows):
+        nn_form_str = '=' + notnull_let + str(i+1) + '/' + total_let + str(i+1)
+        comp_form_str = ('=(' + notnull_let + str(i+1) + '-' +
+                         incor_let + str(i+1) + ')/' + total_let + str(i+1))
+        worksheet.write_formula(i, names_dict['% Not-NULL'], nn_form_str)
+        worksheet.write_formula(i, names_dict['% Complete'], comp_form_str)
+
+    return worksheet
+
+
 def excel_print(data, outfile_name):
     """This prints out the dataframe in the correct format."""
     excel_writer = pd.ExcelWriter(LOCATED + outfile_name, engine='xlsxwriter')
@@ -318,16 +334,7 @@ def excel_print(data, outfile_name):
     worksheet.autofilter(0, 0, 0, num_cols-1)
     worksheet.filter_column_list(names_dict['SAP'], ['Y'])
 
-    notnull_let = xl_col_to_name(names_dict['Not-NULL'])
-    incor_let = xl_col_to_name(names_dict['Incorrect Data'])
-    total_let = xl_col_to_name(names_dict['Total'])
-
-    for i in range(1, num_rows):
-        nn_form_str = '=' + notnull_let + str(i+1) + '/' + total_let + str(i+1)
-        comp_form_str = ('=(' + notnull_let + str(i+1) + '-' +
-                         incor_let + str(i+1) + ')/' + total_let + str(i+1))
-        worksheet.write_formula(i, names_dict['% Not-NULL'], nn_form_str)
-        worksheet.write_formula(i, names_dict['% Complete'], comp_form_str)
+    worksheet = add_nn_comp_forms(worksheet, names_dict, num_rows)
 
     perc_format = workbook.add_format({'num_format': '0%'})
     bg_red = workbook.add_format({'bg_color': '#FF8080'})
