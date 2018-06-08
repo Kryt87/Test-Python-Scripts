@@ -36,16 +36,15 @@ def get_table_header(table):
             col_nam.append(header)
         else:
             col_nam.append('Id')
-    print(col_nam)
     return col_nam
 
 
-def get_table_rows(table):
+def get_table_rows(table, num_row):
     """Strips out useful"""
     td_tags = []
     for row in table.find_all('tr'):
         td_tag = row.find_all('td')
-        if td_tag:
+        if len(td_tag) == num_row:
             td_tags.append(td_tag)
     return td_tags
 
@@ -53,24 +52,18 @@ def get_table_rows(table):
 def create_df(table):
     """Uses BeautifulSoup to create a dataframe."""
 
-    num_col = 0
     num_row = 0
     col_nam = get_table_header(table)
-
-    for row in table.find_all('tr'):
-        td_tags = row.find_all('td')
-        if len(td_tags) > 0:
-            num_row += 1
-            if num_col == 0:
-                num_col = len(td_tags)
+    num_col = len(col_nam)
+    all_rows = get_table_rows(table, num_row)
 
 
-        if len(col_nam) > 0 and len(col_nam) != num_col:
-            raise Exception("Column names don't match the number of columns.")
+    if len(col_nam) > 0 and len(col_nam) != num_col:
+        raise Exception("Column names don't match the number of columns.")
 
-        cols = col_nam if len(col_nam) > 0 else range(0, num_col)
-        df = pd.DataFrame(columns=cols,  index=range(0, num_row))
-        print(df)
+    cols = col_nam if len(col_nam) > 0 else range(0, num_col)
+    df = pd.DataFrame(columns=cols,  index=range(0, num_row))
+    print(df)
 
 
 def get_tables(soup):
