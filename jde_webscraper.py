@@ -18,12 +18,44 @@ def get_soup(url):
     return bs
 
 
+def get_table_header(table):
+    """Returns the table headers."""
+    th_tags = []
+    col_nam = []
+    for row in table.find_all('tr'):
+        th_tag = row.find_all('th')
+        if th_tag:
+            if not th_tags:
+                th_tags = th_tag
+            elif th_tag != th_tags:
+                print("Error! There is another set of headors!")
+                print(th_tag)
+    for th in th_tags:
+        header = th.get_text()
+        if header:
+            col_nam.append(header)
+        else:
+            col_nam.append('Id')
+    print(col_nam)
+    return col_nam
+
+
+def get_table_rows(table):
+    """Strips out useful"""
+    td_tags = []
+    for row in table.find_all('tr'):
+        td_tag = row.find_all('td')
+        if td_tag:
+            td_tags.append(td_tag)
+    return td_tags
+
+
 def create_df(table):
     """Uses BeautifulSoup to create a dataframe."""
 
     num_col = 0
     num_row = 0
-    col_nam = []
+    col_nam = get_table_header(table)
 
     for row in table.find_all('tr'):
         td_tags = row.find_all('td')
@@ -32,10 +64,6 @@ def create_df(table):
             if num_col == 0:
                 num_col = len(td_tags)
 
-        th_tags = row.find_all('th')
-        if len(th_tags) > 0 and len(col_nam) == 0:
-            for th in th_tags:
-                col_nam.append(th.get_text())
 
         if len(col_nam) > 0 and len(col_nam) != num_col:
             raise Exception("Column names don't match the number of columns.")
