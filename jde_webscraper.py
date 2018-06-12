@@ -110,8 +110,9 @@ def get_jde_df():
     list_data = table_data.apply(jde_crawler, axis=1)
     field_data = list_data[0][0]
     for num in range(1, len(list_data)):
-        field_data = pd.concat([field_data, list_data[num][0]],
-                               ignore_index=True)
+        if list_data[num]:
+            field_data = pd.concat([field_data, list_data[num][0]],
+                                   ignore_index=True)
 
     fin_data = pd.merge(table_data, field_data, how='left', left_on=['Table'],
                         right_on=['Table'])
