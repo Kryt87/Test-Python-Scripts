@@ -16,9 +16,13 @@ import pypyodbc as da
 CONNECTION_GIS = "SERVER=PWGISSQL01;DATABASE=PCOGIS;"
 CONNECTION_LVJDE = "SERVER=PWJDESQL01;DATABASE=JDE_PRODUCTION;"
 
-# ELEC_FILE = r"Electricity GIS-SAP Attribute Mapping.xlsx"
-ELEC_FILE = r"old_Electricity GIS-SAP Attribute Mapping.xlsx"
+ELEC_FILE = r"Electricity GIS-SAP Attribute Mapping.xlsx"
+ELEC_SHEET = "GIS Current State"
 GAS_FILE = "Gas_Network_Model_1.7.xlsx"
+GAS_SHEET = "ArcFM Model - Features & Object"
+MAP_FILE = "GIS Integration Interfaces Attribute Mapping_Master.xlsx"
+MAP_ELEC_SHEET = "Attributes Electricity"
+MAP_GAS_SHEET = "Attributes_Gas2"
 
 LOCATED = 'P:\\NF\\Data Migration\\Data Decisions\\'
 FILE_START = 'Data_Decisions_Summary-V'
@@ -78,40 +82,85 @@ def file_loading(in_file):
     """Creats four data frames from three files."""
     print("Loading the three excel files.")
 
-    elec_data = pd.read_excel(ELEC_FILE,
-                              sheet_name="GIS Attributes")
-    gas_data = pd.read_excel(GAS_FILE,
-                             sheet_name="ArcFM Model - Features & Object",
-                             skiprows=1)
+    elec_data = pd.read_excel(ELEC_FILE, sheet_name=ELEC_SHEET)
+    gas_data = pd.read_excel(GAS_FILE, sheet_name=GAS_SHEET, skiprows=1,
+                             keep_default_na=False)
     old_eg_data = pd.read_excel(LOCATED + in_file, sheet_name="GIS Data")
 
-    strp_elec = elec_data[['GIS Table', 'GIS Column Name', 'ALIAS ', 'E/FLOC',
-                           'SAP required']]
-    strp_elec = strp_elec.rename(columns={'GIS Table': 'TABLE',
-                                          'GIS Column Name': 'COLUMN',
-                                          'ALIAS ': 'ALIAS',
+    strp_elec = elec_data[['Table', 'Column', 'Alias', 'SAP required']]
+    strp_elec = strp_elec.rename(columns={'Table': 'TABLE',
+                                          'Column': 'COLUMN',
+                                          'Alias': 'ALIAS',
                                           'SAP required': 'SAP'})
     strp_elec['ELEC/GAS'] = 'E'
 
     strp_gas = gas_data[['OBJECTCLASSNAME', 'NAME2', 'FIELDALIAS',
-                         'FLOC - EQUIP', 'Migrated GIS to SAP ',
+                         'Migrated GIS to SAP ',
                          'SAP Technical Object Description',
-                         'SAP Field Name']]
+                         'SAP Field Name',
+                         'FLOC - EQUIP',
+                         'SAP Data Type']]
     strp_gas = strp_gas.rename(columns={'OBJECTCLASSNAME': 'TABLE',
                                         'NAME2': 'COLUMN',
                                         'FIELDALIAS': 'ALIAS',
-                                        'FLOC - EQUIP': 'E/FLOC',
-                                        'Migrated GIS to SAP ': 'SAP'})
+                                        'Migrated GIS to SAP ': 'SAP',
+                                        'FLOC - EQUIP': 'FLOC/EQUIP'})
     strp_gas['ELEC/GAS'] = 'G'
     strp_old = old_eg_data[['TABLE', 'COLUMN', 'MDS CRITICAL',
-                            'Incorrect Data', 'DR#', 'Notes']]
+                            'Incorrect Data', 'DR#', 'REF', 'Notes']]
     strp_old = strp_old.drop_duplicates(subset=['TABLE', 'COLUMN'])
     old_sap = old_eg_data[['TABLE', 'COLUMN', 'SAP', 'Date Changed']]
 
     return strp_elec, strp_gas, strp_old, old_sap
 
 
-def strip_sql(data):
+def load_gis_interface_file():
+    """Loads the file with GIS intergration mapping."""
+    elec_data = pd.read_excel(MAP_FILE, sheet_name=MAP_ELEC_SHEET)
+    gas_data = pd.read_excel(MAP_FILE, sheet_name=MAP_GAS_SHEET)
+    strp_elec = elec_data[['GIS Table',
+                           'GIS Column Name',
+                           'CCMS',
+                           'MIDDLEWARE ',
+                           'NOCVIEW',
+                           'ELECTRICVIEW',
+                           'PSSSINCAL',
+                           'SPATIALVIEWS',
+                           'VMS',
+                           'DEFECTSVIEWER',
+                           'OMS',
+                           'AMT',
+                           'EDW',
+                           'UGLOCATIONS',
+                           'PTREE',
+                           'DRAT_CRITICALITY',
+                           'GIS_PORTAL']]
+    strp_elec = strp_elec.rename(columns={'GIS Table': 'TABLE',
+                                          'GIS Column Name': 'COLUMN',
+                                          'MIDDLEWARE ': 'MIDDLEWARE',
+                                          'DRAT_CRITICALITY':
+                                              'DRATCRITICALITY',
+                                          'GIS_PORTAL': 'GISPORTAL'})
+    strp_gas = gas_data[['GIS Table',
+                         'GIS Column Name',
+                         'CWMS',
+                         'CCMS',
+                         'MIDDLEWARE ',
+                         'GOTHAM',
+                         'GASVIEW',
+                         'SPATIAL VIEWS',
+                         'EDW',
+                         'UGLOCATIONS',
+                         'GISPORTAL',
+                         'GASHUB(SiteCore)']]
+    strp_gas = strp_gas.rename(columns={'GIS Table': 'TABLE',
+                                        'GIS Column Name': 'COLUMN',
+                                        'MIDDLEWARE ': 'MIDDLEWARE',
+                                        'SPATIAL VIEWS': 'SPATIALVIEWS'})
+    return strp_elec, strp_gas
+
+
+def strip_sql(data, sap_stat=True):
     """Removes non-existent and corrects tablenames."""
     tab_fixs = [["PCOGIS.SDE.", ''],
                 ["Auxiliary Equipment", "AUXILLARYEQUIPMENT"]]
@@ -139,16 +188,17 @@ def strip_sql(data):
                    ['SurfaceStructure', 'STRUCTURESIZE', 'N'],
                    ['COMMSPOWERSUPPLY', 'BATTERYAMPERAGEHOURS', 'N'],
                    ['COMMSPOWERSUPPLY', 'BATTERYCOUNT', 'N']]
-    for tab_str, att_str, sap_str in bad_doubles:
-        data = data[~(data['TABLE'].str.contains(tab_str) &
-                      data['COLUMN'].str.contains(att_str) &
-                      data['SAP'].str.contains(sap_str))]
-    bad_null = [['SurfaceStructure', 'ENCLOSURE'],
-                ['SurfaceStructure', 'ENCLOSUREMANUFACTURER']]
-    for tab_str, att_str in bad_null:
-        data = data[~(data['TABLE'].str.contains(tab_str) &
-                      data['COLUMN'].str.contains(att_str) &
-                      data['SAP'].isnull())]
+    if sap_stat is True:
+        for tab_str, att_str, sap_str in bad_doubles:
+            data = data[~(data['TABLE'].str.contains(tab_str) &
+                          data['COLUMN'].str.contains(att_str) &
+                          data['SAP'].str.contains(sap_str))]
+        bad_null = [['SurfaceStructure', 'ENCLOSURE'],
+                    ['SurfaceStructure', 'ENCLOSUREMANUFACTURER']]
+        for tab_str, att_str in bad_null:
+            data = data[~(data['TABLE'].str.contains(tab_str) &
+                          data['COLUMN'].str.contains(att_str) &
+                          data['SAP'].isnull())]
     return data
 
 
@@ -263,14 +313,17 @@ def nonblank_sql(data):  # This causes a Warning!?
     """Quarries the number of non-nulls per attribute."""
     sql_cmd = "SELECT count(" + str(data['COLUMN']) + """) AS 'Count'
     FROM PCOGIS.SDE.""" + str(data['TABLE'])
-    col = get_sql(sql_cmd, CONNECTION_GIS)
-    new_col = col["count"].iloc[-1]
+    if data['Total'] == 0:
+        new_col = 0
+    else:
+        col = get_sql(sql_cmd, CONNECTION_GIS)
+        new_col = col["count"].iloc[-1]
     return new_col
 
 
 def objectid_sql(table_name):
     """Quarries the total number of objects (rows) per attribute."""
-    sql_cmd = """SELECT count(OBJECTID) AS 'Count'
+    sql_cmd = """SELECT count(*) AS 'Count'
     FROM PCOGIS.SDE.""" + str(table_name)
     col = get_sql(sql_cmd, CONNECTION_GIS)
     new_col = col["count"].iloc[-1]
@@ -282,11 +335,31 @@ def final_order(data):
     data = data[['TABLE',
                  'COLUMN',
                  'ALIAS',
-                 'E/FLOC',
                  'GIS Type',
                  'GIS - Limit/Precision',
                  'DOMAIN LOOKUP',
                  'ELEC/GAS',
+                 'FLOC/EQUIP',
+                 'SAP Data Type',
+                 'CWMS',
+                 'CCMS',
+                 'MIDDLEWARE',
+                 'NOCVIEW',
+                 'GOTHAM',
+                 'GASVIEW',
+                 'ELECTRICVIEW',
+                 'PSSSINCAL',
+                 'SPATIALVIEWS',
+                 'VMS',
+                 'DEFECTSVIEWER',
+                 'OMS',
+                 'AMT',
+                 'EDW',
+                 'UGLOCATIONS',
+                 'PTREE',
+                 'DRATCRITICALITY',
+                 'GISPORTAL',
+                 'GASHUB(SiteCore)',
                  'MDS CRITICAL',
                  'SAP',
                  'Date Changed',
@@ -297,6 +370,7 @@ def final_order(data):
                  '% Not-NULL',
                  '% Complete',
                  'DR#',
+                 'REF',
                  'Notes']]
     data = data.sort_values(by=['TABLE', 'COLUMN'])
     return data
@@ -357,14 +431,19 @@ def script_runner():
     infile, outfile = file_names(LOCATED, FILE_START, FILE_END)
 
     strp_elec, strp_gas, strp_old, old_sap = file_loading(infile)
+    strpmap_elec, strpmap_gas = load_gis_interface_file()
 
     eg_data = pd.concat([strp_elec, strp_gas], sort=True)
+    map_data = pd.concat([strpmap_elec, strpmap_gas], sort=True)
     eg_data = strip_sql(eg_data)
+    map_data = strip_sql(map_data, False)
     eg_data = eg_data.drop_duplicates(subset=['TABLE', 'COLUMN', 'SAP'])
+    map_data = map_data.drop_duplicates(subset=['TABLE', 'COLUMN'])
 
     eg_data = schema_list(eg_data)
 
     eg_data = up_merge(eg_data, strp_old)
+    eg_data = up_merge(eg_data, map_data)
 
     new_sap = eg_data[['TABLE', 'COLUMN', 'SAP']]
     old_sap = strip_sql(old_sap)
@@ -386,29 +465,44 @@ def script_runner():
     eg_data = up_merge(eg_data, dom_look)
     eg_data['DOMAIN LOOKUP'] = eg_data['DOMAIN LOOKUP'].fillna('N')
 
-    print('Querying the number of nulls per attribute. As of '
+    # print("--------------------------")
+    # print('Querying the number of nulls per attribute. As of '
+    #       + str(datetime.datetime.now()))
+    # eg_data['NULL'] = eg_data.apply(null_sql, axis=1)
+    # print("--------------------------")
+
+    print("--------------------------")
+    print('Querying the total number of objects per table. As of '
           + str(datetime.datetime.now()))
-    eg_data['NULL'] = eg_data.apply(null_sql, axis=1)
+    table_list = eg_data[['TABLE']].drop_duplicates()
+    table_list['Total'] = table_list['TABLE'].apply(objectid_sql)
+    eg_data = pd.merge(eg_data, table_list, how='left',
+                       left_on=['TABLE'],
+                       right_on=['TABLE'])
+
     print('Querying the number of non-nulls per attribute. As of '
           + str(datetime.datetime.now()))
     eg_data['Not-NULL'] = eg_data.apply(nonblank_sql, axis=1)
 
-    print('Querying the total number of objects per table. As of '
-          + str(datetime.datetime.now()))
-    eg_data['Total'] = eg_data['TABLE'].apply(objectid_sql)
+    eg_data['NULL'] = eg_data['Total'] - eg_data['Not-NULL']
 
-    fin_data = final_order(eg_data)
+    eg_data = final_order(eg_data)
 
-    excel_print(fin_data, outfile)
+    excel_print(eg_data, outfile)
 
     os.rename(LOCATED + infile, DEST_LOCATION + infile)
 
 
+print("--------------------------")
 print('Starting ' + str(datetime.datetime.now()))
+print("--------------------------")
 
 script_runner()
 
+print("--------------------------")
 print('Ending ' + str(datetime.datetime.now()))
 print("""--------------------------
+--------------------------
       Share Workbook
+--------------------------
 --------------------------""")
