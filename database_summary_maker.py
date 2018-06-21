@@ -17,8 +17,8 @@ CONNECTION_GIS = "SERVER=PWGISSQL01;DATABASE=PCOGIS;"
 CONNECTION_LVJDE = "SERVER=PWJDESQL01;DATABASE=JDE_PRODUCTION;"
 
 ELEC_FILE = r"Electricity GIS-SAP Attribute Mapping.xlsx"
-ELEC_SHEET = "GIS Current State"
-GAS_FILE = "Gas_Network_Model_1.7.xlsx"
+ELEC_SHEET = "Electricity Characteristics"
+GAS_FILE = "Gas Network Model 1.8.xlsx"
 GAS_SHEET = "ArcFM Model - Features & Object"
 MAP_FILE = "GIS Integration Interfaces Attribute Mapping_Master.xlsx"
 MAP_ELEC_SHEET = "Attributes Electricity"
@@ -82,35 +82,34 @@ def file_loading(in_file):
     """Creats four data frames from three files."""
     print("Loading the three excel files.")
 
-    elec_data = pd.read_excel(ELEC_FILE, sheet_name=ELEC_SHEET)
+    elec_data = pd.read_excel(ELEC_FILE, sheet_name=ELEC_SHEET, skiprows=1)
     gas_data = pd.read_excel(GAS_FILE, sheet_name=GAS_SHEET, skiprows=1,
                              keep_default_na=False)
     old_eg_data = pd.read_excel(LOCATED + in_file, sheet_name="GIS Data")
 
-    strp_elec = elec_data[['Table', 'Column', 'Alias', 'SAP required']]
-    strp_elec = strp_elec.rename(columns={'Table': 'TABLE',
-                                          'Column': 'COLUMN',
-                                          'Alias': 'ALIAS',
-                                          'SAP required': 'SAP'})
+    strp_elec = elec_data[['Source Table', 'Source Column', 'SAP required',
+                           'Master System', 'SAP Field Type',
+                           'Technical Object']]
+    strp_elec = strp_elec.rename(columns={'Source Table': 'TABLE',
+                                          'Source Column': 'COLUMN',
+                                          'SAP required': 'SAP',
+                                          'Master System': 'Master Location',
+                                          'SAP Field Type': 'SAP Data Type',
+                                          'Technical Object': 'FLOC/EQUIP'})
     strp_elec['ELEC/GAS'] = 'E'
 
-    strp_gas = gas_data[['OBJECTCLASSNAME', 'NAME2', 'FIELDALIAS',
-                         'Migrated GIS to SAP ',
-                         'SAP Technical Object Description',
-                         'SAP Field Name',
-                         'FLOC - EQUIP',
-                         'SAP Data Type']]
+    strp_gas = gas_data[['OBJECTCLASSNAME', 'NAME2', 'Migrated GIS to SAP ',
+                         'Data Master', 'SAP Data Type', 'FLOC - EQUIP']]
     strp_gas = strp_gas.rename(columns={'OBJECTCLASSNAME': 'TABLE',
                                         'NAME2': 'COLUMN',
-                                        'FIELDALIAS': 'ALIAS',
                                         'Migrated GIS to SAP ': 'SAP',
+                                        'Data Master': 'Master Location',
                                         'FLOC - EQUIP': 'FLOC/EQUIP'})
     strp_gas['ELEC/GAS'] = 'G'
-    strp_old = old_eg_data[['TABLE', 'COLUMN', 'MDS CRITICAL',
+    strp_old = old_eg_data[['TABLE', 'COLUMN', 'MDS CRITICAL', 'Transforming',
                             'Incorrect Data', 'DR#', 'REF', 'Notes']]
     strp_old = strp_old.drop_duplicates(subset=['TABLE', 'COLUMN'])
     old_sap = old_eg_data[['TABLE', 'COLUMN', 'SAP', 'Date Changed']]
-
     return strp_elec, strp_gas, strp_old, old_sap
 
 
@@ -160,7 +159,7 @@ def load_gis_interface_file():
     return strp_elec, strp_gas
 
 
-def strip_sql(data, sap_stat=True):
+def old_strip_sql(data, sap_stat=True):
     """Removes non-existent and corrects tablenames."""
     tab_fixs = [["PCOGIS.SDE.", ''],
                 ["Auxiliary Equipment", "AUXILLARYEQUIPMENT"]]
@@ -170,34 +169,231 @@ def strip_sql(data, sap_stat=True):
     bad_atts = [" ", "SHAPE_Length", "HVFUSES", "LVFUSES", "SHAPE_Area",
                 "ACTUALLENGTH", "DECOMMISSIONINGDATE", "DECOMMISSIONINGREASON"]
     data = data[~data['COLUMN'].isin(bad_atts)]
-    bad_tab_atts = [['SWITCHUNIT', 'INTERRUPTINGMEDIUM'],
-                    ['DistributionMain', 'CROSSINGID'],
-                    ['DistributionMain', 'MOUNTINGTYPE'],
-                    ['DistributionMain', 'MOUNTINGPOSITION']]
+    bad_tab_atts = [['SWITCHUNIT$', 'INTERRUPTINGMEDIUM$'],
+                    ['DistributionMain$', '^CROSSINGID$'],
+                    ['DistributionMain$', '^MOUNTINGTYPE$'],
+                    ['DistributionMain$', '^MOUNTINGPOSITION$']]
     for tab_str, att_str in bad_tab_atts:
-        data = data[~(data['TABLE'].str.contains(tab_str) &
-                      data['COLUMN'].str.contains(att_str))]
-    bad_doubles = [['Regulator', 'SUBTYPECD', 'y'],
-                   ['RegulatorStation', 'EQUIPMENTID', 'N'],
-                   ['SurfaceStructure', 'APPLICATION', 'N'],
-                   ['SurfaceStructure', 'ENTRY', 'N'],
-                   ['SurfaceStructure', 'FACILITYID', 'N'],
-                   ['SurfaceStructure', 'MANUFACTURER', 'N'],
-                   ['SurfaceStructure', 'MATERIAL', 'N'],
-                   ['SurfaceStructure', 'MODEL', 'N'],
-                   ['SurfaceStructure', 'STRUCTURESIZE', 'N'],
-                   ['COMMSPOWERSUPPLY', 'BATTERYAMPERAGEHOURS', 'N'],
-                   ['COMMSPOWERSUPPLY', 'BATTERYCOUNT', 'N']]
+        data = data[~(data['TABLE'].str.match(tab_str) &
+                      data['COLUMN'].str.match(att_str))]
+    bad_doubles = [['Regulator$', '^SUBTYPECD$', 'y'],
+                   ['RegulatorStation$', '^EQUIPMENTID$', 'N'],
+                   ['SurfaceStructure$', '^APPLICATION$', 'N'],
+                   ['SurfaceStructure$', '^ENTRY$', 'N'],
+                   ['SurfaceStructure$', '^FACILITYID$', 'N'],
+                   ['SurfaceStructure$', '^MANUFACTURER$', 'N'],
+                   ['SurfaceStructure$', '^MATERIAL$', 'N'],
+                   ['SurfaceStructure$', '^MODEL$', 'N'],
+                   ['SurfaceStructure$', '^STRUCTURESIZE$', 'N'],
+                   ['COMMSPOWERSUPPLY$', '^BATTERYAMPERAGEHOURS$', 'N'],
+                   ['COMMSPOWERSUPPLY$', '^BATTERYCOUNT$', 'N']]
     if sap_stat is True:
         for tab_str, att_str, sap_str in bad_doubles:
-            data = data[~(data['TABLE'].str.contains(tab_str) &
-                          data['COLUMN'].str.contains(att_str) &
-                          data['SAP'].str.contains(sap_str))]
-        bad_null = [['SurfaceStructure', 'ENCLOSURE'],
-                    ['SurfaceStructure', 'ENCLOSUREMANUFACTURER']]
+            data = data[~(data['TABLE'].str.match(tab_str) &
+                          data['COLUMN'].str.match(att_str) &
+                          data['SAP'].str.match(sap_str))]
+        bad_null = [['SurfaceStructure$', '^ENCLOSURE$'],
+                    ['SurfaceStructure$', '^ENCLOSURETYPE$'],
+                    ['SurfaceStructure$', '^ENCLOSUREMANUFACTURER$']]
         for tab_str, att_str in bad_null:
-            data = data[~(data['TABLE'].str.contains(tab_str) &
-                          data['COLUMN'].str.contains(att_str) &
+            data = data[~(data['TABLE'].str.match(tab_str) &
+                          data['COLUMN'].str.match(att_str) &
+                          data['SAP'].isnull())]
+    return data
+
+
+def strip_sql(data, sap_stat=True):
+    """Removes non-existent and corrects tablenames."""
+    tab_fixs = [["PCOGIS.SDE.", ''],
+                ["Auxiliary Equipment", "AUXILLARYEQUIPMENT"]]
+    for old_str, new_str in tab_fixs:
+        data['TABLE'] = data['TABLE'].str.replace(old_str, new_str)
+    data = data.dropna(subset=['COLUMN'])
+    bad_atts = [" ", "SHAPE_Length", "HVFUSES", "LVFUSES", "SHAPE_Area",
+                "None", "ACTUALLENGTH", "DECOMMISSIONINGDATE",
+                "DECOMMISSIONINGREASON", 'LOTS YET TO ADD']
+    data = data[~data['COLUMN'].isin(bad_atts)]
+    bad_tabs = ['LocationAttributes', 'CustomerConnections', 'TBD']
+    data = data[~data['TABLE'].isin(bad_tabs)]
+    bad_tab_atts = [['SWITCHUNIT$', 'INTERRUPTINGMEDIUM$'],
+                    ['DistributionMain$', 'CROSSINGID$'],
+                    ['DistributionMain$', 'MOUNTINGTYPE$'],
+                    ['DistributionMain$', 'MOUNTINGPOSITION$']]
+    for tab_str, att_str in bad_tab_atts:
+        data = data[~(data['TABLE'].str.match(tab_str) &
+                      data['COLUMN'].str.match(att_str))]
+    bad_doubles = [['Regulator$', 'SUBTYPECD$', 'y'],
+                   ['RegulatorStation$', 'EQUIPMENTID$', 'N'],
+                   ['SurfaceStructure$', 'APPLICATION$', 'N'],
+                   ['SurfaceStructure$', 'ENTRY$', 'N'],
+                   ['SurfaceStructure$', 'FACILITYID$', 'N'],
+                   ['SurfaceStructure$', 'MANUFACTURER$', 'N'],
+                   ['SurfaceStructure$', 'MATERIAL$', 'N'],
+                   ['SurfaceStructure$', 'MODEL$', 'N'],
+                   ['SurfaceStructure$', 'STRUCTURESIZE$', 'N'],
+                   ['COMMSPOWERSUPPLY$', 'BATTERYAMPERAGEHOURS$', 'N'],
+                   ['COMMSPOWERSUPPLY$', 'BATTERYCOUNT$', 'N'],
+                   ['PillarPoint$', 'DATEMANUFACTURED$', 'TBC'],
+                   ['PillarPoint$', 'FACILITYID$', 'TBC'],
+                   ['PillarPoint$', 'FEEDERID$', 'TBC'],
+                   ['PillarPoint$', 'NUMBEROFUSEDCIRCUITS$', 'TBC'],
+                   ['PillarPoint$', 'SUBTYPECD$', 'N'],
+                   ['PillarPoint$', 'TOTALNUMBEROFCIRCUITS$', 'TBC'],
+                   ['PillarPoint$', 'TRUENZMGPOS$', 'N'],
+                   ['SupportStructure$', 'HIGHESTVOLTAGE$', 'N'],
+                   ['SurfaceStructure$', 'ASSETFUNCTION$', 'N'],
+                   ['SurfaceStructure$', 'ENCLOSUREMANUFACTURER$', 'N'],
+                   ['SurfaceStructure$', 'ENCLOSURETYPE$', 'N'],
+                   ['SurfaceStructure$', 'GLOBALID$', 'N'],
+                   ['SurfaceStructure$', 'STREETNAME$', 'N'],
+                   ['SurfaceStructure$', 'STREETNO$', 'N'],
+                   ['SurfaceStructure$', 'SUBURB$', 'N'],
+                   ['SurfaceStructure$', 'SYMBOLROTATION$', 'N'],
+                   ['SurfaceStructure$', 'TOWN$', 'N'],
+                   ['Switch$', 'FACILITYID$', 'N'],
+                   ['Switch$', 'FEEDERID$', 'N'],
+                   ['Switch$', 'FEEDERID2$', 'N'],
+                   ['Switch$', 'GEONETFEEDERCODE$', 'N'],
+                   ['Switch$', 'GLOBALID$', 'N'],
+                   ['Switch$', 'GROUNDEDINDICATOR$', 'N'],
+                   ['Switch$', 'INSTALLATIONDATE$', 'N'],
+                   ['Switch$', 'MOUNTING$', 'N'],
+                   ['Switch$', 'NORMALPOSITION$', 'N'],
+                   ['Switch$', 'NUMPHASES$', 'N'],
+                   ['Switch$', 'OPERATINGVOLTAGE$', 'N'],
+                   ['Switch$', 'OUTOFORDERINDICATOR$', 'N'],
+                   ['Switch$', 'REFERENCE$', 'N'],
+                   ['Switch$', 'REMOTECONTROLLED$', 'N'],
+                   ['Switch$', 'REMOTEINDICATION$', 'N'],
+                   ['Switch$', 'RETICULATION$', 'N'],
+                   ['Switch$', 'SITEID$', 'N'],
+                   ['Switch$', 'STREETNAME$', 'N'],
+                   ['Switch$', 'STREETNO$', 'N'],
+                   ['Switch$', 'SUBTYPECD$', 'N'],
+                   ['Switch$', 'SUBURB$', 'N'],
+                   ['Switch$', 'SYMBOLROTATION$', 'N'],
+                   ['Switch$', 'TOWN$', 'N'],
+                   ['Switch$', 'WORKORDERID$', 'N'],
+                   ['SWITCHUNIT$', 'ARCQUENCHING$', 'N'],
+                   ['SWITCHUNIT$', 'C_INTJDEID$', 'N'],
+                   ['SWITCHUNIT$', 'COMMENTS$', 'N'],
+                   ['SWITCHUNIT$', 'DATEMANUFACTURED$', 'N'],
+                   ['SWITCHUNIT$', 'DATEPURCHASED$', 'N'],
+                   ['SWITCHUNIT$', 'INSTALLATIONDATE$', 'N'],
+                   ['SWITCHUNIT$', 'INSULATIONMEDIUM$', 'N'],
+                   ['SWITCHUNIT$', 'LOADBREAKINGCAPACITY$', 'N'],
+                   ['SWITCHUNIT$', 'MANUFACTURER$', 'N'],
+                   ['SWITCHUNIT$', 'MODEL$', 'N'],
+                   ['SWITCHUNIT$', 'NORMALCURRENTRATING$', 'N'],
+                   ['SWITCHUNIT$', 'NUMPHASES$', 'N'],
+                   ['SWITCHUNIT$', 'OWNER$', 'N'],
+                   ['SWITCHUNIT$', 'REFERENCE$', 'N'],
+                   ['SWITCHUNIT$', 'SERIALNUMBER$', 'N'],
+                   ['SWITCHUNIT$', 'VISUALEARTHINDICATOR$', 'N'],
+                   ['SWITCHUNIT$', 'VOLTAGERATING$', 'N'],
+                   ['SWITCHUNIT$', 'WORKORDERID$', 'N'],
+                   ['UndergroundStructure$', 'C_INTJDEID$', 'N'],
+                   ['UndergroundStructure$', 'COMMENTS$', 'N'],
+                   ['UndergroundStructure$', 'FACILITYID$', 'N'],
+                   ['UndergroundStructure$', 'FEEDERID$', 'N'],
+                   ['UndergroundStructure$', 'GLOBALID$', 'N'],
+                   ['UndergroundStructure$', 'HIGHESTVOLTAGE$', 'N'],
+                   ['UndergroundStructure$', 'INSTALLATIONDATE$', 'N'],
+                   ['UndergroundStructure$', 'OUTOFORDERINDICATOR$', 'N'],
+                   ['UndergroundStructure$', 'OWNER$', 'N'],
+                   ['UndergroundStructure$', 'REFERENCE$', 'N'],
+                   ['UndergroundStructure$', 'STREETNAME$', 'N'],
+                   ['UndergroundStructure$', 'STREETNO$', 'N'],
+                   ['UndergroundStructure$', 'SUBURB$', 'N'],
+                   ['UndergroundStructure$', 'SYMBOLROTATION$', 'N'],
+                   ['UndergroundStructure$', 'TOWN$', 'N'],
+                   ['UndergroundStructure$', 'WORKORDERID$', 'N'],
+                   ['Fuse$', 'INSTALLATIONDATE$', 'N'],
+                   ['Ground$', 'BELOWGROUNDCONNECTION$', 'N'],
+                   ['POWERTRANSFORMERUNIT$', 'COOLINGTYPE$', 'TBD'],
+                   ['POWERTRANSFORMERUNIT$', 'COOLINGTYPE2$', 'TBD'],
+                   ['POWERTRANSFORMERUNIT$', 'COOLINGTYPE3$', 'TBD'],
+                   ['POWERTRANSFORMERUNIT$', 'CTBURDENVA$', 'N'],
+                   ['POWERTRANSFORMERUNIT$', 'CTCLASS$', 'N'],
+                   ['POWERTRANSFORMERUNIT$', 'CTQUANTITY$', 'N'],
+                   ['POWERTRANSFORMERUNIT$', 'CTRATIO$', 'N'],
+                   ['POWERTRANSFORMERUNIT$', 'IMPEDANCE2$', 'N'],
+                   ['POWERTRANSFORMERUNIT$', 'IMPEDANCE3$', 'N'],
+                   ['POWERTRANSFORMERUNIT$', 'IMPEDANCEZ0$', 'N'],
+                   ['POWERTRANSFORMERUNIT$', 'RATEDMVA$', 'N'],
+                   ['POWERTRANSFORMERUNIT$', 'RATEDMVA2$', 'N'],
+                   ['POWERTRANSFORMERUNIT$', 'RATEDMVA3$', 'N'],
+                   ['AUXILLARYEQUIPMENT$', 'MANUFACTURER$', 'N'],
+                   ['AUXILLARYEQUIPMENT$', 'MODEL$', 'N']]
+    if sap_stat is True:
+        for tab_str, att_str, sap_str in bad_doubles:
+            data = data[~(data['TABLE'].str.match(tab_str) &
+                          data['COLUMN'].str.match(att_str) &
+                          data['SAP'].str.match(sap_str))]
+        bad_null = [['SurfaceStructure$', 'ENCLOSURE$'],
+                    ['SurfaceStructure$', 'ENCLOSUREMANUFACTURER$'],
+                    ['SurfaceStructure$', 'ENCLOSURETYPE$'],
+                    ['Fuse$', 'ACCURACY$'],
+                    ['Fuse$', 'ANCILLARYROLE$'],
+                    ['Fuse$', 'ASSETFUNCTION$'],
+                    ['Fuse$', 'C_INTJDEID$'],
+                    ['Fuse$', 'COMMENTS$'],
+                    ['Fuse$', 'CREATIONUSER$'],
+                    ['Fuse$', 'DATECREATED$'],
+                    ['Fuse$', 'DATEMODIFIED$'],
+                    ['Fuse$', 'DEVICETYPE$'],
+                    ['Fuse$', 'ELECTRICTRACEWEIGHT$'],
+                    ['Fuse$', 'ENABLED$'],
+                    ['Fuse$', 'FACILITYID$'],
+                    ['Fuse$', 'FEEDERID$'],
+                    ['Fuse$', 'FEEDERID2$'],
+                    ['Fuse$', 'FEEDERINFO$'],
+                    ['Fuse$', 'GEONETFEEDERCODE$'],
+                    ['Fuse$', 'GEONETFEEDERID$'],
+                    ['Fuse$', 'GEONETSUBSTATION$'],
+                    ['Fuse$', 'GLOBALID$'],
+                    ['Fuse$', 'INSTALLEDBY$'],
+                    ['Fuse$', 'LABELTEXT$'],
+                    ['Fuse$', 'LASTUSER$'],
+                    ['Fuse$', 'MANUFACTURER$'],
+                    ['Fuse$', 'MAXCONTINUOUSCURRENT$'],
+                    ['Fuse$', 'MAXINTERRUPTINGCURRENT$'],
+                    ['Fuse$', 'MAXOPERATINGVOLTAGE$'],
+                    ['Fuse$', 'MOUNTING$'],
+                    ['Fuse$', 'NOMINALVOLTAGE$'],
+                    ['Fuse$', 'NORMALPOSITION$'],
+                    ['Fuse$', 'NUMPHASES$'],
+                    ['Fuse$', 'OBJECTID$'],
+                    ['Fuse$', 'OPERATINGVOLTAGE$'],
+                    ['Fuse$', 'OUTOFORDERINDICATOR$'],
+                    ['Fuse$', 'OWNER$'],
+                    ['Fuse$', 'PARENTID$'],
+                    ['Fuse$', 'PHASEDESIGNATION$'],
+                    ['Fuse$', 'PREMISE$'],
+                    ['Fuse$', 'PRESENTPOSITION$'],
+                    ['Fuse$', 'RDB_UFID$'],
+                    ['Fuse$', 'REFERENCE$'],
+                    ['Fuse$', 'REMOTECONTROLLED$'],
+                    ['Fuse$', 'REMOTEINDICATION$'],
+                    ['Fuse$', 'RETICULATION$'],
+                    ['Fuse$', 'SCADACONTROLMECHANISM$'],
+                    ['Fuse$', 'SCADACONTROLTYPE$'],
+                    ['Fuse$', 'SCADAPTID$'],
+                    ['Fuse$', 'SHAPE$'],
+                    ['Fuse$', 'SITEID$'],
+                    ['Fuse$', 'STREETNAME$'],
+                    ['Fuse$', 'STREETNO$'],
+                    ['Fuse$', 'SUBTYPECD$'],
+                    ['Fuse$', 'SUBURB$'],
+                    ['Fuse$', 'SYMBOLROTATION$'],
+                    ['Fuse$', 'TIMESTAMP$'],
+                    ['Fuse$', 'TOWN$'],
+                    ['Fuse$', 'TYPE$'],
+                    ['Fuse$', 'WORKORDERID$'],
+                    ['Fuse$', 'ZONE$']]
+        for tab_str, att_str in bad_null:
+            data = data[~(data['TABLE'].str.match(tab_str) &
+                          data['COLUMN'].str.match(att_str) &
                           data['SAP'].isnull())]
     return data
 
@@ -279,7 +475,8 @@ def diff_columns(data):  # This function needs to be updated to remove warning.
 def des_table_sql():
     """Created a dataframe of all attributes with a domain lookup."""
     sql_cmd = """SELECT TABLE_, FIELD_NAME, 'Y' AS 'DOMAIN LOOKUP'
-    FROM PCOGIS.SDE.DOMAIN_LOOKUP_PC"""
+    FROM PCOGIS.SDE.DOMAIN_LOOKUP_PC
+    WHERE VALUE_ <> ''"""
     col = get_sql(sql_cmd, CONNECTION_GIS)
     col = col.drop_duplicates()
     return col
@@ -334,12 +531,13 @@ def final_order(data):
     """Sorts both cols and rows to desired order."""
     data = data[['TABLE',
                  'COLUMN',
-                 'ALIAS',
                  'GIS Type',
                  'GIS - Limit/Precision',
                  'DOMAIN LOOKUP',
                  'ELEC/GAS',
                  'FLOC/EQUIP',
+                 'Master Location',
+                 'Transforming',
                  'SAP Data Type',
                  'CWMS',
                  'CCMS',
@@ -436,7 +634,7 @@ def script_runner():
     eg_data = pd.concat([strp_elec, strp_gas], sort=True)
     map_data = pd.concat([strpmap_elec, strpmap_gas], sort=True)
     eg_data = strip_sql(eg_data)
-    map_data = strip_sql(map_data, False)
+    map_data = old_strip_sql(map_data, False)
     eg_data = eg_data.drop_duplicates(subset=['TABLE', 'COLUMN', 'SAP'])
     map_data = map_data.drop_duplicates(subset=['TABLE', 'COLUMN'])
 
@@ -446,7 +644,7 @@ def script_runner():
     eg_data = up_merge(eg_data, map_data)
 
     new_sap = eg_data[['TABLE', 'COLUMN', 'SAP']]
-    old_sap = strip_sql(old_sap)
+    # old_sap = strip_sql(old_sap)
     old_sap = old_sap.drop_duplicates(subset=['TABLE', 'COLUMN', 'SAP'])
     dif_sap = up_merge(new_sap, old_sap)
     dif_sap = dif_sap.apply(diff_columns, axis=1)
