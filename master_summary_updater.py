@@ -135,7 +135,7 @@ def up_merge(data1, data2):
     return fin_data
 
 
-def nonblank_sql(data):  # This causes a Warning!?
+def nonblank_sql(data):
     """Quarries the number of non-nulls per attribute."""
     sql_cmd = "SELECT count(" + str(data['COLUMN']) + """) AS 'Count'
     FROM PCOGIS.SDE.""" + str(data['TABLE'])
@@ -176,20 +176,54 @@ def missing_domain(data):
         if data['NULL'] == data['Total']:
             col = 0
         else:
-            sql_cmd = (
-                    'SELECT ' + 'tab.' + data['COLUMN'] + '''
+            sql_cmd = """SELECT tab.{1}
 ,dl.DESCRIPTION AS 'DESCRIPTION'
 ,COUNT(*) AS "Count"
-FROM PCOGIS.SDE.''' + data['TABLE'] + ''' tab
-LEFT JOIN PCOGIS.sde.DOMAIN_LOOKUP_PC dl ON tab.''' + data['COLUMN'] + ''' = dl.VALUE_
-AND dl.TABLE_ = \'''' + data['TABLE'] + '''\'
-AND dl.FIELD_NAME = \'''' + data['COLUMN'] + '''\'
-WHERE tab.''' + data['COLUMN'] + ''' IS NOT NULL
-GROUP BY tab.''' + data['COLUMN'] + ''', dl.DESCRIPTION
-ORDER BY tab.''' + data['COLUMN'])
+FROM PCOGIS.SDE.{0} tab
+LEFT JOIN PCOGIS.sde.DOMAIN_LOOKUP_PC dl ON tab.{1} = dl.VALUE_
+AND dl.TABLE_ = '{0}'
+AND dl.FIELD_NAME = '{1}'
+WHERE tab.{1} IS NOT NULL
+GROUP BY tab.{1}, dl.DESCRIPTION
+ORDER BY tab.{1}""".format(data['TABLE'], data['COLUMN'])
             col_dom_df = get_sql(sql_cmd, CONNECTION_GIS)
             col = cont_null_df(col_dom_df)
-    # print(data['TABLE'], data['COLUMN'], col)
+    return col
+
+
+def bad_dates(data):
+    """Querrys the number of erroneous dates."""
+    if data['GIS Type'] == 'datetime2' and data['NULL'] != data['Total']:
+        sql_cmd = """SELECT COUNT(*) AS "Count"
+FROM PCOGIS.sde.{0}
+WHERE {1} < '01/01/1900'
+OR ({1} > '01/01/1900'
+AND {1} < '01/01/1910')
+OR {1} > '01/01/2019'""".format(data['TABLE'], data['COLUMN'])
+        sql_data = get_sql(sql_cmd, CONNECTION_GIS)
+        col = sql_data["count"].iloc[-1]
+    else:
+        col = data['Incorrect Data']
+    return col
+
+
+def check_subtypecd(data):
+    """Querrys the number of subtypecds missing a description."""
+    if data['COLUMN'] == 'SUBTYPECD' and data['NULL'] != data['Total']:
+        sql_cmd = """SELECT tab.SUBTYPECD
+,dl.SUBTYPE_NAME AS 'DESCRIPTION'
+,COUNT(*) AS "Count"
+FROM PCOGIS.SDE.{0} tab
+LEFT JOIN (SELECT DISTINCT TABLE_, SUBTYPE_CODE, SUBTYPE_NAME
+FROM PCOGIS.sde.DOMAIN_LOOKUP_PC) dl ON tab.SUBTYPECD = dl.SUBTYPE_CODE
+AND dl.TABLE_ = '{0}'
+WHERE tab.SUBTYPECD IS NOT NULL
+GROUP BY tab.SUBTYPECD, dl.SUBTYPE_NAME
+ORDER BY tab.SUBTYPECD""".format(data['TABLE'])
+        col_dom_df = get_sql(sql_cmd, CONNECTION_GIS)
+        col = cont_null_df(col_dom_df)
+    else:
+        col = data['Incorrect Data']
     return col
 
 
@@ -295,8 +329,6 @@ def script_runner():
     infile, outfile = file_names(LOCATED, FILE_START, FILE_END)
     eg_data = file_loading(infile)
 
-
-
     print("--------------------------")
     print('Querying the total number of objects per table. As of '
           + str(datetime.datetime.now()))
@@ -317,6 +349,12 @@ def script_runner():
     print('Querying sum of values with no domain description. As of '
           + str(datetime.datetime.now()))
     eg_data['Incorrect Data'] = eg_data.apply(missing_domain, axis=1)
+    print('Querying number of erroneous dates. As of '
+          + str(datetime.datetime.now()))
+    eg_data['Incorrect Data'] = eg_data.apply(bad_dates, axis=1)
+    print('Querying number of SUBTYPECDS with no descriptions. As of '
+          + str(datetime.datetime.now()))
+    eg_data['Incorrect Data'] = eg_data.apply(check_subtypecd, axis=1)
 
     eg_data = final_order(eg_data)
 
