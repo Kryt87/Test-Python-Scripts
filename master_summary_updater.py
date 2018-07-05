@@ -3,6 +3,22 @@
 Created on Fri Jun 15 11:47:19 2018
 
 @author: KLD300
+
+This script counts Non-Nulls and table totals. It also counts the errors per
+attribute for:
+    * Everything with a domain description
+    * Every date type column
+    * Every SUBTYPECD column
+    * Every STREETNO column
+    * Every SYMBOLROTATION column
+    * Every C_INTJDEID column
+    * Every TXWEIGHT column
+    * Every TAPCHANGEROILVOLUME and TXOILVOLUME column
+    * Every SERIALNUMBER column
+    * Every BRIDGENAME column
+    * Every COOLINGTYPE (1, 2 and 3) column (Missing Domain Lookups)
+    * Every MOUNTING column (Missing Domain Lookups)
+    * Every WORKORDER and WORKORDERID column (non-numeric etc.)
 """
 
 import datetime
@@ -16,7 +32,8 @@ import pypyodbc as da
 CONNECTION_GIS = "SERVER=PWGISSQL01;DATABASE=PCOGIS;"
 CONNECTION_LVJDE = "SERVER=PWJDESQL01;DATABASE=JDE_PRODUCTION;"
 
-LOCATED = 'P:\\NF\\Data Migration\\Data Decisions\\'
+# LOCATED = 'P:\\NF\\Data Migration\\Data Decisions\\'
+LOCATED = 'C:\\Users\\KLD300\\Documents\\Python Scripts\\Perc_Updater\\'
 FILE_START = 'Data_Decisions_Summary-V'
 FILE_END = '.xlsx'
 DEST_LOCATION = 'P:\\NF\\Data Migration\\Data Decisions\\Archive\\'
@@ -74,7 +91,9 @@ def file_loading(in_file):
     """Creats four data frames from three files."""
     print("Loading the Master excel file.")
 
-    old_eg_data = pd.read_excel(LOCATED + in_file, sheet_name="GIS Data")
+    old_eg_data = pd.read_excel(LOCATED + in_file, sheet_name="GIS Data",
+                                keep_default_na=False)
+    old_eg_data.replace('', np.nan, inplace=True)
 
     strp_old = old_eg_data[['TABLE',
                             'COLUMN',
@@ -180,7 +199,8 @@ def missing_domain(data):
 ,dl.DESCRIPTION AS 'DESCRIPTION'
 ,COUNT(*) AS "Count"
 FROM PCOGIS.SDE.{0} tab
-LEFT JOIN PCOGIS.sde.DOMAIN_LOOKUP_PC dl ON tab.{1} = dl.VALUE_
+LEFT JOIN (SELECT DISTINCT TABLE_, FIELD_NAME, VALUE_, DESCRIPTION
+FROM PCOGIS.sde.DOMAIN_LOOKUP_PC) dl ON tab.{1} = dl.VALUE_
 AND dl.TABLE_ = '{0}'
 AND dl.FIELD_NAME = '{1}'
 WHERE tab.{1} IS NOT NULL
@@ -222,6 +242,188 @@ GROUP BY tab.SUBTYPECD, dl.SUBTYPE_NAME
 ORDER BY tab.SUBTYPECD""".format(data['TABLE'])
         col_dom_df = get_sql(sql_cmd, CONNECTION_GIS)
         col = cont_null_df(col_dom_df)
+    else:
+        col = data['Incorrect Data']
+    return col
+
+
+def check_streetno(data):
+    """Querrys the number of erroneous streetno values."""
+    if data['COLUMN'] == 'STREETNO' and data['NULL'] != data['Total']:
+        sql_cmd = """SELECT	COUNT(STREETNO) AS 'Count'
+FROM PCOGIS.sde.{0}
+WHERE STREETNO LIKE '%[a-z][a-z]%'
+AND NOT STREETNO LIKE '% NO %'
+AND NOT STREETNO LIKE '%unit %'
+AND NOT STREETNO LIKE '%lot %'
+AND NOT STREETNO LIKE '%apartment %'
+AND NOT STREETNO LIKE '%flat %'
+OR STREETNO = '99990000'""".format(data['TABLE'])
+        col_dom_df = get_sql(sql_cmd, CONNECTION_GIS)
+        col = col_dom_df["count"].iloc[-1]
+    else:
+        col = data['Incorrect Data']
+    return col
+
+
+def check_symbolrotation(data):
+    """Querrys the number of symbolrotation values outside of -360-to-360."""
+    if data['COLUMN'] == 'SYMBOLROTATION' and data['NULL'] != data['Total']:
+        sql_cmd = """SELECT COUNT(*) AS 'Count'
+FROM PCOGIS.SDE.{0}
+WHERE SYMBOLROTATION < -360
+OR SYMBOLROTATION > 360""".format(data['TABLE'])
+        col_dom_df = get_sql(sql_cmd, CONNECTION_GIS)
+        col = col_dom_df["count"].iloc[-1]
+    else:
+        col = data['Incorrect Data']
+    return col
+
+
+def check_c_intjdeid(data):
+    """Querrys the number of JDE id not of length 7."""
+    if data['COLUMN'] == 'C_INTJDEID' and data['NULL'] != data['Total']:
+        sql_cmd = """SELECT COUNT(*) AS 'Count'
+FROM PCOGIS.SDE.{0}
+WHERE LEN(CAST(C_INTJDEID AS INT)) <> 7""".format(data['TABLE'])
+        col_dom_df = get_sql(sql_cmd, CONNECTION_GIS)
+        col = col_dom_df["count"].iloc[-1]
+    else:
+        col = data['Incorrect Data']
+    return col
+
+
+def check_txweight(data):
+    """Querrys the number of erroneous TXWEIGHT values."""
+    if data['COLUMN'] == 'TXWEIGHT' and data['NULL'] != data['Total']:
+        sql_cmd = """SELECT COUNT(*) AS 'Count'
+FROM PCOGIS.SDE.{0}
+WHERE TXWEIGHT NOT LIKE '%[0-9]KG'""".format(data['TABLE'])
+        col_dom_df = get_sql(sql_cmd, CONNECTION_GIS)
+        col = col_dom_df["count"].iloc[-1]
+    else:
+        col = data['Incorrect Data']
+    return col
+
+
+def check_volumes(data):
+    """Querrys the number of erroneous TXWEIGHT values."""
+    if (data['COLUMN'] in ('TAPCHANGEROILVOLUME', 'TXOILVOLUME')
+            and data['NULL'] != data['Total']):
+        sql_cmd = """SELECT COUNT(*) AS 'Count'
+FROM PCOGIS.SDE.{0}
+WHERE {1} NOT LIKE '%[0-9]L'""".format(data['TABLE'], data['COLUMN'])
+        col_dom_df = get_sql(sql_cmd, CONNECTION_GIS)
+        col = col_dom_df["count"].iloc[-1]
+    else:
+        col = data['Incorrect Data']
+    return col
+
+
+def check_serialnumber(data):
+    """Querrys the number of erroneous serialnumber values."""
+    if (data['COLUMN'] in ('SERIALNUMBER', 'SERIALNO', 'SERIAL',
+                           'TAPCHANGERSERIALNO')
+            and data['NULL'] != data['Total']):
+        sql_cmd = """SELECT COUNT(*) AS 'Count'
+FROM PCOGIS.SDE.{0}
+WHERE {1} IS NOT NULL
+GROUP BY {1}
+HAVING {1} NOT LIKE '%[A-Z][0-9]%'
+AND {1} NOT LIKE '%[0-9][A-Z]%'
+AND ISNUMERIC({1}) = 0
+OR {1} LIKE '%?%'
+OR COUNT(*) > 1
+ORDER BY {1}""".format(data['TABLE'], data['COLUMN'])
+        col_dom_df = get_sql(sql_cmd, CONNECTION_GIS)
+        col = col_dom_df["count"].sum()
+        if not col:
+            col = 0
+    else:
+        col = data['Incorrect Data']
+    return col
+
+
+def check_bridgename(data):
+    """Querrys the number of erroneous BRIDGENAME values."""
+    if data['COLUMN'] == 'BRIDGENAME' and data['NULL'] != data['Total']:
+        sql_cmd = """SELECT COUNT(*) AS 'Count'
+FROM PCOGIS.SDE.{0}
+WHERE BRIDGENAME IN ('', 'NOT ACCURATELY RECORDED')""".format(data['TABLE'])
+        col_dom_df = get_sql(sql_cmd, CONNECTION_GIS)
+        col = col_dom_df["count"].iloc[-1]
+    else:
+        col = data['Incorrect Data']
+    return col
+
+
+def check_coolingtypes(data):
+    """Querrys the number of erroneous COOLINGTYPE values."""
+    if (data['COLUMN'] in ('COOLINGTYPE', 'COOLINGTYPE2', 'COOLINGTYPE3')
+            and data['TABLE'] in ('POWERTRANSFORMERUNIT',
+                                  'VOLTAGEREGULATORUNIT')
+            and data['NULL'] != data['Total']):
+        sql_cmd = """SELECT tab.{1}
+,dl.DESCRIPTION
+,COUNT(*)  AS 'Count'
+FROM PCOGIS.SDE.{0} tab
+LEFT JOIN (SELECT DISTINCT TABLE_, FIELD_NAME, VALUE_, DESCRIPTION
+FROM PCOGIS.sde.DOMAIN_LOOKUP_PC) dl ON tab.{1} = dl.VALUE_
+AND dl.TABLE_ = 'DISTRIBUTIONTRANSFORMERUNIT'
+AND dl.FIELD_NAME = 'COOLINGTYPE'
+WHERE tab.{1} IS NOT NULL
+GROUP BY tab.{1}, dl.DESCRIPTION
+ORDER BY tab.{1}""".format(data['TABLE'], data['COLUMN'])
+        col_dom_df = get_sql(sql_cmd, CONNECTION_GIS)
+        col = cont_null_df(col_dom_df)
+    else:
+        col = data['Incorrect Data']
+    return col
+
+
+def check_mounting(data):
+    """Querrys the number of erroneous MOUNTING values."""
+    if (data['COLUMN'] == 'MOUNTING'
+            and data['TABLE'] in ('INSTRUMENTTRANSFORMERUNIT',
+                                  'POWERTRANSFORMERUNIT',
+                                  'RECLOSERUNIT',
+                                  'VOLTAGEREGULATORUNIT')
+            and data['NULL'] != data['Total']):
+        sql_cmd = """SELECT tab.{1}
+,dl.DESCRIPTION
+,COUNT(*)  AS 'Count'
+FROM PCOGIS.SDE.{0} tab
+LEFT JOIN (SELECT DISTINCT TABLE_, FIELD_NAME, VALUE_, DESCRIPTION
+FROM PCOGIS.sde.DOMAIN_LOOKUP_PC) dl ON tab.{1} = dl.VALUE_
+AND dl.TABLE_ = '{2}'
+AND dl.FIELD_NAME = '{1}'
+WHERE tab.{1} IS NOT NULL
+GROUP BY tab.{1}, dl.DESCRIPTION
+ORDER BY tab.{1}""".format(data['TABLE'], data['COLUMN'],
+                           data['TABLE'].replace('UNIT', ''))
+        col_dom_df = get_sql(sql_cmd, CONNECTION_GIS)
+        col = cont_null_df(col_dom_df)
+    else:
+        col = data['Incorrect Data']
+    return col
+
+
+def check_workorders(data):
+    """Querrys the number of erroneous workorder ID values.
+
+    Only values that are not an integer of length 5-8."""
+    if (data['COLUMN'] in ('WORKORDER', 'WORKORDERID')
+            and data['NULL'] != data['Total']):
+        sql_cmd = """SELECT COUNT(*) AS 'Count'
+FROM PCOGIS.SDE.{0}
+WHERE {1} NOT LIKE '[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]'
+AND {1} NOT LIKE '[0-9][0-9][0-9][0-9][0-9][0-9][0-9]'
+AND {1} NOT LIKE '[0-9][0-9][0-9][0-9][0-9][0-9]'
+AND {1} NOT LIKE '[0-9][0-9][0-9][0-9][0-9]'
+OR {1} IN ('99999999', '999990000', '9990000', '9999000')""".format(
+    data['TABLE'], data['COLUMN'])
+        col_dom_df = get_sql(sql_cmd, CONNECTION_GIS)
+        col = col_dom_df["count"].iloc[-1]
     else:
         col = data['Incorrect Data']
     return col
@@ -290,6 +492,14 @@ def add_nn_comp_forms(worksheet, names_dict, num_rows):
     return worksheet
 
 
+def column_length_format(col_lengths, names_dict, worksheet):
+    """Resizes specific columns columns."""
+    for col_name, col_val in col_lengths:
+        colnum = names_dict[col_name]
+        worksheet.set_column(colnum, colnum, col_val)
+    return worksheet
+
+
 def excel_print(data, outfile_name):
     """This prints out the dataframe in the correct format."""
     excel_writer = pd.ExcelWriter(LOCATED + outfile_name, engine='xlsxwriter')
@@ -306,7 +516,30 @@ def excel_print(data, outfile_name):
     worksheet.autofilter(0, 0, 0, num_cols-1)
     worksheet.filter_column_list(names_dict['SAP'], ['Y'])
 
+    col_lengths = [['TABLE', 32.11],
+                   ['COLUMN', 34.89],
+                   ['GIS Type', 9.44],
+                   ['GIS - Limit/Precision', 10.44],
+                   ['DOMAIN LOOKUP', 17.56],
+                   ['ELEC/GAS', 10.78],
+                   ['FLOC/EQUIP', 12.89],
+                   ['Master Location', 16.11],
+                   ['Transforming', 5.89],
+                   ['SAP Data Type', 15.78],
+                   ['SAP', 8.11],
+                   ['Date Changed', 14.89],
+                   ['NULL', 6.89],
+                   ['Not-NULL', 10.67],
+                   ['Incorrect Data', 9.78],
+                   ['Total', 6.67],
+                   ['% Not-NULL', 12.56],
+                   ['% Complete', 12.44],
+                   ['DR#', 13.22],
+                   ['REF', 7.67],
+                   ['Notes', 84.33]]
+
     worksheet = add_nn_comp_forms(worksheet, names_dict, num_rows)
+    worksheet = column_length_format(col_lengths, names_dict, worksheet)
 
     perc_format = workbook.add_format({'num_format': '0%'})
     bg_red = workbook.add_format({'bg_color': '#FF8080'})
@@ -355,22 +588,57 @@ def script_runner():
     print('Querying number of SUBTYPECDS with no descriptions. As of '
           + str(datetime.datetime.now()))
     eg_data['Incorrect Data'] = eg_data.apply(check_subtypecd, axis=1)
+    print('Querying number of erroneous STREETNO values. As of '
+          + str(datetime.datetime.now()))
+    eg_data['Incorrect Data'] = eg_data.apply(check_streetno, axis=1)
+    print('Querying number of erroneous SYMBOLROTATION values. As of '
+          + str(datetime.datetime.now()))
+    eg_data['Incorrect Data'] = eg_data.apply(check_symbolrotation, axis=1)
+    print('Querying number of erroneous C_INTJDEID values. As of '
+          + str(datetime.datetime.now()))
+    eg_data['Incorrect Data'] = eg_data.apply(check_c_intjdeid, axis=1)
+    print('Querying number of erroneous TXWEIGHT values. As of '
+          + str(datetime.datetime.now()))
+    eg_data['Incorrect Data'] = eg_data.apply(check_txweight, axis=1)
+    print('Querying number of erroneous TAPCHANGEROILVOLUME and TXOILVOLUME' +
+          ' values. As of ' + str(datetime.datetime.now()))
+    eg_data['Incorrect Data'] = eg_data.apply(check_volumes, axis=1)
+    print('Querying number of erroneous serial number values. As of '
+          + str(datetime.datetime.now()))
+    eg_data['Incorrect Data'] = eg_data.apply(check_serialnumber, axis=1)
+    print('Querying number of erroneous BRIDGENAME values. As of '
+          + str(datetime.datetime.now()))
+    eg_data['Incorrect Data'] = eg_data.apply(check_bridgename, axis=1)
+    print('Querying number of erroneous COOLINGTYPES (1, 2 & 3) values. As of '
+          + str(datetime.datetime.now()))
+    eg_data['Incorrect Data'] = eg_data.apply(check_coolingtypes, axis=1)
+    print('Querying number of erroneous MOUNTING values. As of '
+          + str(datetime.datetime.now()))
+    eg_data['Incorrect Data'] = eg_data.apply(check_mounting, axis=1)
+    print('Querying number of erroneous WORKORDER & WORKORDERID values. As of '
+          + str(datetime.datetime.now()))
+    eg_data['Incorrect Data'] = eg_data.apply(check_workorders, axis=1)
 
     eg_data = final_order(eg_data)
 
     excel_print(eg_data, outfile)
 
-    os.rename(LOCATED + infile, DEST_LOCATION + infile)
+    # os.rename(LOCATED + infile, DEST_LOCATION + infile)
 
+
+START_TIME = datetime.datetime.now()
 
 print("--------------------------")
-print('Starting ' + str(datetime.datetime.now()))
+print('Starting ' + str(START_TIME))
 print("--------------------------")
 
 script_runner()
 
+END_TIME = datetime.datetime.now()
+
 print("--------------------------")
-print('Ending ' + str(datetime.datetime.now()))
+print('Ending ' + str(END_TIME))
+print('Ran for ' + str(END_TIME - START_TIME))
 print("""--------------------------
 --------------------------
       Share Workbook

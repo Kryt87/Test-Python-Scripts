@@ -11,7 +11,7 @@ CONNECTION_GIS = "SERVER=PWGISSQL01;DATABASE=PCOGIS;"
 CONNECTION_LVJDE = "SERVER=PWJDESQL01;DATABASE=JDE_PRODUCTION;"
 
 ELEC_FILE = r"Electricity GIS-SAP Attribute Mapping.xlsx"
-ELEC_SHEET1 = "GIS Current State"
+ELEC_SHEET1 = "GIS Attribute Initial Selection"
 ELEC_SHEET2 = "Electricity Characteristics"
 
 
@@ -200,7 +200,25 @@ def strip_sql(data, sap_stat=True):
                    ['POWERTRANSFORMERUNIT$', 'RATEDMVA2$', 'N'],
                    ['POWERTRANSFORMERUNIT$', 'RATEDMVA3$', 'N'],
                    ['AUXILLARYEQUIPMENT$', 'MANUFACTURER$', 'N'],
-                   ['AUXILLARYEQUIPMENT$', 'MODEL$', 'N']]
+                   ['AUXILLARYEQUIPMENT$', 'MODEL$', 'N'],
+                   ['COMMSPOWERSUPPLY$', 'BATTERYTYPE$', 'N'],
+                   ['SupportStructure$', 'FUNCTION_$', 'N'],
+                   ['COMMSPOWERSUPPLY$', 'GENERATORFUELTYPE$', 'N'],
+                   ['COMMSPOWERSUPPLY$', 'HOURSOFSUPPLY$', 'N'],
+                   ['COMMSPOWERSUPPLY$', 'PARALELLCOUNT$', 'N'],
+                   ['COMMSPOWERSUPPLY$', 'PARALELLCOUNT$', 'TBD'],
+                   ['COMMSPOWERSUPPLY$', 'SYSTEMVOLTAGE$', 'TBD'],
+                   ['SurfaceStructure$', 'TRUENZMGPOS$', 'N'],
+                   ['SupportStructure$', 'ABSOLUTE$', 'N'],
+                   ['DISTTRANSFUSEUNIT$', 'VOLTAGERATING$', 'N'],
+                   ['DISTTRANSFUSEUNIT$', 'WORKORDERID$', 'N'],
+                   ['SupportStructure$', 'FEEDERID$', 'TBC'],
+                   ['SupportStructure$', 'SHAPE$', ' N'],
+                   ['SupportStructure$', 'SUBTYPECD$', 'TBD'],
+                   ['SupportStructure$', 'TREATMENTTYPE$', 'N'],
+                   ['SupportStructure$', 'TRUENZMG$', 'N'],
+                   ['SupportStructure$', 'TYPEOFTOP$', 'N'],
+                   ['SupportStructure$', 'USAGETYPE$', 'N']]
     if sap_stat is True:
         for tab_str, att_str, sap_str in bad_doubles:
             data = data[~(data['TABLE'].str.match(tab_str) &
@@ -296,19 +314,20 @@ def up_merge(data1, data2):
 
 def excel_print(data1, data2, data3, data4, data5, data6):
     """This prints out the dataframe in the correct format."""
+
+    list_data = [data1, data2, data3, data4, data5, data6]
+    name_list = ['Old elec', 'New elec', 'Old elec dup', 'New elec dup',
+                 'Diff After Strip', 'New Elec Before Strip']
+    zipped = zip(list_data, name_list)
     excel_writer = pd.ExcelWriter('elec_delta2.xlsx', engine='xlsxwriter')
-    data1.to_excel(excel_writer, sheet_name='Old elec',
-                   index=False, freeze_panes=(1, 0))
-    data2.to_excel(excel_writer, sheet_name='New elec',
-                   index=False, freeze_panes=(1, 0))
-    data3.to_excel(excel_writer, sheet_name='Old elec dup',
-                   index=False, freeze_panes=(1, 0))
-    data4.to_excel(excel_writer, sheet_name='New elec dup',
-                   index=False, freeze_panes=(1, 0))
-    data5.to_excel(excel_writer, sheet_name='Diff After Strip',
-                   index=False, freeze_panes=(1, 0))
-    data6.to_excel(excel_writer, sheet_name='New Elec Before Strip',
-                   index=False, freeze_panes=(1, 0))
+    for data, name in zipped:
+        data.to_excel(excel_writer, sheet_name=name,
+                      index=False, freeze_panes=(1, 0))
+        num_cols = len(list(data))
+        worksheet = excel_writer.sheets[name]
+        worksheet.autofilter(0, 0, 0, num_cols-1)
+        worksheet.set_column(0, 0, 23.56)
+        worksheet.set_column(1, 1, 34.89)
     excel_writer.save()
 
 

@@ -24,7 +24,8 @@ MAP_FILE = "GIS Integration Interfaces Attribute Mapping_Master.xlsx"
 MAP_ELEC_SHEET = "Attributes Electricity"
 MAP_GAS_SHEET = "Attributes_Gas2"
 
-LOCATED = 'P:\\NF\\Data Migration\\Data Decisions\\'
+# LOCATED = 'P:\\NF\\Data Migration\\Data Decisions\\'
+LOCATED = 'C:\\Users\\KLD300\\Documents\\Python Scripts\\Perc_Updater\\'
 FILE_START = 'Data_Decisions_Summary-V'
 FILE_END = '.xlsx'
 DEST_LOCATION = 'P:\\NF\\Data Migration\\Data Decisions\\Archive\\'
@@ -82,10 +83,42 @@ def file_loading(in_file):
     """Creats four data frames from three files."""
     print("Loading the three excel files.")
 
-    elec_data = pd.read_excel(ELEC_FILE, sheet_name=ELEC_SHEET, skiprows=1)
+    elec_data = pd.read_excel(ELEC_FILE, sheet_name=ELEC_SHEET, skiprows=1,
+                              keep_default_na=False)
+    elec_data.replace('', np.nan, inplace=True)
     gas_data = pd.read_excel(GAS_FILE, sheet_name=GAS_SHEET, skiprows=1,
                              keep_default_na=False)
-    old_eg_data = pd.read_excel(LOCATED + in_file, sheet_name="GIS Data")
+    gas_data.replace('', np.nan, inplace=True)
+    old_eg_data = pd.read_excel(LOCATED + in_file, sheet_name="GIS Data",
+                                keep_default_na=False)
+    old_eg_data.replace('', np.nan, inplace=True)
+    com_old_data = old_eg_data[['TABLE',
+                                'COLUMN',
+                                'ELEC/GAS',
+                                'FLOC/EQUIP',
+                                'Master Location',
+                                'SAP Data Type',
+                                'CWMS',
+                                'CCMS',
+                                'MIDDLEWARE',
+                                'NOCVIEW',
+                                'GOTHAM',
+                                'GASVIEW',
+                                'ELECTRICVIEW',
+                                'PSSSINCAL',
+                                'SPATIALVIEWS',
+                                'VMS',
+                                'DEFECTSVIEWER',
+                                'OMS',
+                                'AMT',
+                                'EDW',
+                                'UGLOCATIONS',
+                                'PTREE',
+                                'DRATCRITICALITY',
+                                'GISPORTAL',
+                                'GASHUB(SiteCore)',
+                                'SAP']]
+    com_old_data['Old/New'] = 'Old'
 
     strp_elec = elec_data[['Source Table', 'Source Column', 'SAP required',
                            'Master System', 'SAP Field Type',
@@ -110,7 +143,7 @@ def file_loading(in_file):
                             'Incorrect Data', 'DR#', 'REF', 'Notes']]
     strp_old = strp_old.drop_duplicates(subset=['TABLE', 'COLUMN'])
     old_sap = old_eg_data[['TABLE', 'COLUMN', 'SAP', 'Date Changed']]
-    return strp_elec, strp_gas, strp_old, old_sap
+    return strp_elec, strp_gas, strp_old, old_sap, com_old_data
 
 
 def load_gis_interface_file():
@@ -324,7 +357,25 @@ def strip_sql(data, sap_stat=True):
                    ['POWERTRANSFORMERUNIT$', 'RATEDMVA2$', 'N'],
                    ['POWERTRANSFORMERUNIT$', 'RATEDMVA3$', 'N'],
                    ['AUXILLARYEQUIPMENT$', 'MANUFACTURER$', 'N'],
-                   ['AUXILLARYEQUIPMENT$', 'MODEL$', 'N']]
+                   ['AUXILLARYEQUIPMENT$', 'MODEL$', 'N'],
+                   ['COMMSPOWERSUPPLY$', 'BATTERYTYPE$', 'N'],
+                   ['SupportStructure$', 'FUNCTION_$', 'N'],
+                   ['COMMSPOWERSUPPLY$', 'GENERATORFUELTYPE$', 'N'],
+                   ['COMMSPOWERSUPPLY$', 'HOURSOFSUPPLY$', 'N'],
+                   ['COMMSPOWERSUPPLY$', 'PARALELLCOUNT$', 'N'],
+                   ['COMMSPOWERSUPPLY$', 'PARALELLCOUNT$', 'TBD'],
+                   ['COMMSPOWERSUPPLY$', 'SYSTEMVOLTAGE$', 'TBD'],
+                   ['SurfaceStructure$', 'TRUENZMGPOS$', 'N'],
+                   ['SupportStructure$', 'ABSOLUTE$', 'N'],
+                   ['DISTTRANSFUSEUNIT$', 'VOLTAGERATING$', 'N'],
+                   ['DISTTRANSFUSEUNIT$', 'WORKORDERID$', 'N'],
+                   ['SupportStructure$', 'FEEDERID$', 'TBC'],
+                   ['SupportStructure$', 'SHAPE$', ' N'],
+                   ['SupportStructure$', 'SUBTYPECD$', 'TBD'],
+                   ['SupportStructure$', 'TREATMENTTYPE$', 'N'],
+                   ['SupportStructure$', 'TRUENZMG$', 'N'],
+                   ['SupportStructure$', 'TYPEOFTOP$', 'N'],
+                   ['SupportStructure$', 'USAGETYPE$', 'N']]
     if sap_stat is True:
         for tab_str, att_str, sap_str in bad_doubles:
             data = data[~(data['TABLE'].str.match(tab_str) &
@@ -463,12 +514,14 @@ def up_merge(data1, data2):
 def diff_columns(data):  # This function needs to be updated to remove warning.
     """Determines if there is a SAP migration change and dates change."""
     n_date = datetime.date.today().strftime("%d-%m-%y")
+    data.replace(np.nan, '', inplace=True)
     if ((data['SAP_x'] != data['SAP_y']) &
             (pd.notnull(data['SAP_x']) & pd.notnull(data['SAP_y']))):
         data['Date Changed'] = (str(data['SAP_y']) + ' to ' +
                                 str(data['SAP_x']) + ' ' + n_date)
         print(str(data['TABLE']) + ' ' + str(data['COLUMN']) + ' ' +
               data['Date Changed'])
+    data.replace('', np.nan, inplace=True)
     return data
 
 
@@ -590,6 +643,14 @@ def add_nn_comp_forms(worksheet, names_dict, num_rows):
     return worksheet
 
 
+def column_length_format(col_lengths, names_dict, worksheet):
+    """Resizes specific columns columns."""
+    for col_name, col_val in col_lengths:
+        colnum = names_dict[col_name]
+        worksheet.set_column(colnum, colnum, col_val)
+    return worksheet
+
+
 def excel_print(data, outfile_name):
     """This prints out the dataframe in the correct format."""
     excel_writer = pd.ExcelWriter(LOCATED + outfile_name, engine='xlsxwriter')
@@ -606,7 +667,30 @@ def excel_print(data, outfile_name):
     worksheet.autofilter(0, 0, 0, num_cols-1)
     worksheet.filter_column_list(names_dict['SAP'], ['Y'])
 
+    col_lengths = [['TABLE', 32.11],
+                   ['COLUMN', 34.89],
+                   ['GIS Type', 9.44],
+                   ['GIS - Limit/Precision', 10.44],
+                   ['DOMAIN LOOKUP', 17.56],
+                   ['ELEC/GAS', 10.78],
+                   ['FLOC/EQUIP', 12.89],
+                   ['Master Location', 16.11],
+                   ['Transforming', 5.89],
+                   ['SAP Data Type', 15.78],
+                   ['SAP', 8.11],
+                   ['Date Changed', 14.89],
+                   ['NULL', 6.89],
+                   ['Not-NULL', 10.67],
+                   ['Incorrect Data', 9.78],
+                   ['Total', 6.67],
+                   ['% Not-NULL', 12.56],
+                   ['% Complete', 12.44],
+                   ['DR#', 13.22],
+                   ['REF', 7.67],
+                   ['Notes', 84.33]]
+
     worksheet = add_nn_comp_forms(worksheet, names_dict, num_rows)
+    worksheet = column_length_format(col_lengths, names_dict, worksheet)
 
     perc_format = workbook.add_format({'num_format': '0%'})
     bg_red = workbook.add_format({'bg_color': '#FF8080'})
@@ -623,12 +707,28 @@ def excel_print(data, outfile_name):
     excel_writer.save()
 
 
+def excel_print_diff(data):
+    """This prints out the difference between old and new."""
+    n_date = datetime.date.today().strftime("%d-%m-%y")
+    excel_writer = pd.ExcelWriter('delta_data_summary-{}.xlsx'.format(n_date),
+                                  engine='xlsxwriter')
+    data.to_excel(excel_writer, sheet_name='GIS Delta',
+                  index=False, freeze_panes=(1, 0))
+    num_cols = len(list(data))
+    worksheet = excel_writer.sheets['GIS Delta']
+    worksheet.autofilter(0, 0, 0, num_cols-1)
+    worksheet.set_column(0, 0, 32.11)
+    worksheet.set_column(1, 1, 34.89)
+
+    excel_writer.save()
+
+
 def script_runner():
     """Runs this script."""
 
     infile, outfile = file_names(LOCATED, FILE_START, FILE_END)
 
-    strp_elec, strp_gas, strp_old, old_sap = file_loading(infile)
+    strp_elec, strp_gas, strp_old, old_sap, com_old_data = file_loading(infile)
     strpmap_elec, strpmap_gas = load_gis_interface_file()
 
     eg_data = pd.concat([strp_elec, strp_gas], sort=True)
@@ -688,17 +788,80 @@ def script_runner():
 
     excel_print(eg_data, outfile)
 
-    os.rename(LOCATED + infile, DEST_LOCATION + infile)
+    com_new_data = eg_data[['TABLE',
+                            'COLUMN',
+                            'ELEC/GAS',
+                            'FLOC/EQUIP',
+                            'Master Location',
+                            'SAP Data Type',
+                            'CWMS',
+                            'CCMS',
+                            'MIDDLEWARE',
+                            'NOCVIEW',
+                            'GOTHAM',
+                            'GASVIEW',
+                            'ELECTRICVIEW',
+                            'PSSSINCAL',
+                            'SPATIALVIEWS',
+                            'VMS',
+                            'DEFECTSVIEWER',
+                            'OMS',
+                            'AMT',
+                            'EDW',
+                            'UGLOCATIONS',
+                            'PTREE',
+                            'DRATCRITICALITY',
+                            'GISPORTAL',
+                            'GASHUB(SiteCore)',
+                            'SAP']]
+    com_new_data['Old/New'] = 'New'
+    com_old_data.replace('', np.nan, inplace=True)
+    com_new_data.replace('', np.nan, inplace=True)
+    fin_dif = pd.concat([com_old_data, com_new_data]).drop_duplicates(
+        subset=['TABLE',
+                'COLUMN',
+                'ELEC/GAS',
+                'FLOC/EQUIP',
+                'Master Location',
+                'SAP Data Type',
+                'CWMS',
+                'CCMS',
+                'MIDDLEWARE',
+                'NOCVIEW',
+                'GOTHAM',
+                'GASVIEW',
+                'ELECTRICVIEW',
+                'PSSSINCAL',
+                'SPATIALVIEWS',
+                'VMS',
+                'DEFECTSVIEWER',
+                'OMS',
+                'AMT',
+                'EDW',
+                'UGLOCATIONS',
+                'PTREE',
+                'DRATCRITICALITY',
+                'GISPORTAL',
+                'GASHUB(SiteCore)',
+                'SAP'], keep=False)
+
+    # os.rename(LOCATED + infile, DEST_LOCATION + infile)
+
+    excel_print_diff(fin_dif)
 
 
+START_TIME = datetime.datetime.now()
 print("--------------------------")
-print('Starting ' + str(datetime.datetime.now()))
+print('Starting ' + str(START_TIME))
 print("--------------------------")
 
 script_runner()
 
+END_TIME = datetime.datetime.now()
+
 print("--------------------------")
-print('Ending ' + str(datetime.datetime.now()))
+print('Ending ' + str(END_TIME))
+print('Ran for ' + str(END_TIME - START_TIME))
 print("""--------------------------
 --------------------------
       Share Workbook
